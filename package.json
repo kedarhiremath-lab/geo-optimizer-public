@@ -1,0 +1,28 @@
+{
+  "name": "geo-optimizer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Trossen GEO/SEO content optimizer — Milestone 1 (optimizer core)",
+  "scripts": {
+    "optimize": "tsx src/cli.ts",
+    "ui": "tsx src/ui/server.ts",
+    "test": "vitest run",
+    "eval": "tsx eval/run.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@mozilla/readability": "^0.5.0",
+    "express": "^4.21.2",
+    "jsdom": "^25.0.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
