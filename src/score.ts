@@ -94,6 +94,30 @@ export function scoreOriginal(article: Article, config: OptimizerConfig): Scored
   return { article, findings, baselineScore };
 }
 
+/**
+ * Build an Article from the rewritten Markdown draft so it can be scored on the
+ * same checklist as the original — this is what produces the "after" GEO score.
+ * Meta (title/description) is carried from the original because those are page
+ * tags, not part of the body rewrite, so the comparison stays apples-to-apples.
+ */
+export function articleFromMarkdown(md: string, base: Article): Article {
+  const headings = [...md.matchAll(/^#{1,3}\s+(.+)$/gm)].map((m) => m[1].trim());
+  const text = md
+    .replace(/^#{1,3}\s+/gm, "")
+    .replace(/^[-*]\s+/gm, "")
+    .replace(/\*\*/g, "")
+    .trim();
+  const mdLinks = [...md.matchAll(/\]\((https?:[^)]+)\)/g)].map((m) => m[1]);
+  const bare = md.match(/https?:\/\/[^\s)]+/g) ?? [];
+  const links = Array.from(new Set([...mdLinks, ...bare]));
+  return { ...base, text, content: md, headings, links };
+}
+
+/** Score the optimized draft (0-100) so the UI can show baseline -> optimized. */
+export function scoreDraft(markdown: string, base: Article, config: OptimizerConfig): number {
+  return scoreOriginal(articleFromMarkdown(markdown, base), config).baselineScore;
+}
+
 /** Rank findings into a prioritized fix-list: weak/absent first, weighted by impact. */
 export function buildFixList(scored: ScoredArticle): FixItem[] {
   return scored.findings

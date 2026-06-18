@@ -67,6 +67,8 @@ export interface ClaimDiffResult {
 export interface OptimizeResult {
   url: string;
   baselineScore: number;
+  /** Score of the rewritten draft on the same checklist (the "after"). */
+  optimizedScore: number;
   fixList: FixItem[];
   rewrittenDraft: string;
   jsonLd: Record<string, unknown>;

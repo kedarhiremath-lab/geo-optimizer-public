@@ -4,7 +4,7 @@
 
 import { fetchRendered, type FetchOptions } from "./fetch.js";
 import { extractArticle } from "./extract.js";
-import { scoreOriginal, buildFixList } from "./score.js";
+import { scoreOriginal, buildFixList, scoreDraft } from "./score.js";
 import { completeLong } from "./llm.js";
 import { rewritePrompt } from "./prompts.js";
 import { claimDiff } from "./claimDiff.js";
@@ -35,10 +35,12 @@ export async function optimize(
 
   const diff = await claimDiff(provider, article.text, rewrittenDraft);
   const { jsonLd, valid, notes } = buildJsonLd(article);
+  const optimizedScore = scoreDraft(rewrittenDraft, article, config);
 
   return {
     url,
     baselineScore: scored.baselineScore,
+    optimizedScore,
     fixList,
     rewrittenDraft,
     jsonLd,

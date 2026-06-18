@@ -48,6 +48,13 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
  .ring{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.3rem}
  .score{font-size:2.6rem;font-weight:800;line-height:1}
  .score small{font-size:1rem;color:var(--muted);font-weight:500}
+ .beforeafter{display:flex;align-items:baseline;justify-content:center;gap:.4rem}
+ .beforeafter .b4{font-size:1.5rem;font-weight:700;color:var(--muted)}
+ .beforeafter .arrow{color:var(--muted);font-size:1.2rem}
+ .beforeafter .after{font-size:2.6rem;font-weight:800;line-height:1}
+ .beforeafter .after small{font-size:.9rem;color:var(--muted);font-weight:500}
+ .delta{margin-top:.35rem;font-weight:700;font-size:.9rem}
+ .delta.up{color:var(--good)} .delta.down{color:var(--bad)}
  .badge{display:inline-flex;align-items:center;gap:.4rem;padding:.25rem .6rem;border-radius:999px;font-weight:600;font-size:.85rem}
  .badge.ok{background:rgba(46,194,138,.15);color:var(--good)}
  .badge.no{background:rgba(255,93,108,.15);color:var(--bad)}
@@ -147,10 +154,17 @@ function draftCard(md){
 }
 function render(d){
   const safe=d.safe;
+  const delta=d.optimizedScore-d.baselineScore;
+  const deltaStr=(delta>=0?"+":"")+delta;
   let h='<div class="grid">';
-  h+='<div class="card ring"><h3>Baseline</h3><div class="score" style="color:'+scoreColor(d.baselineScore)+'">'+
-     d.baselineScore+'<small>/100</small></div><div class="badge '+(safe?"ok":"no")+'">'+
-     (safe?"✓ safe to use":"⚠ needs review")+'</div></div>';
+  h+='<div class="card ring"><h3>GEO/SEO score</h3>'+
+     '<div class="beforeafter">'+
+       '<span class="b4">'+d.baselineScore+'</span>'+
+       '<span class="arrow">→</span>'+
+       '<span class="after" style="color:'+scoreColor(d.optimizedScore)+'">'+d.optimizedScore+'<small>/100</small></span>'+
+     '</div>'+
+     '<div class="delta '+(delta>=0?"up":"down")+'">'+deltaStr+' points</div>'+
+     '<div class="badge '+(safe?"ok":"no")+'">'+(safe?"✓ safe to use":"⚠ needs review")+'</div></div>';
   h+='<div class="card"><h3>Prioritized fix-list</h3><ol class="fixes">'+
      d.fixList.map(f=>'<li><b>'+esc(f.label)+'</b> <span>— '+esc(f.recommendation)+'</span></li>').join('')+
      (d.fixList.length?'':'<li>No gaps found — content already strong.</li>')+'</ol></div>';

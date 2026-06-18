@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   const r = await optimize(url, provider);
 
   console.log(`\n=== ${r.url} ===`);
-  console.log(`Baseline GEO/SEO score: ${r.baselineScore}/100`);
+  console.log(`GEO/SEO score: ${r.baselineScore} -> ${r.optimizedScore}/100 (${r.optimizedScore - r.baselineScore >= 0 ? "+" : ""}${r.optimizedScore - r.baselineScore})`);
   console.log(`Safe to use: ${r.safe ? "YES" : "NO — review flags below"}`);
 
   console.log(`\n--- Prioritized fix-list ---`);
