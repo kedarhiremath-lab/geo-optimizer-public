@@ -59,6 +59,17 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
  .copy{background:transparent;border:1px solid var(--line);color:var(--muted);padding:.3rem .7rem;font-size:.8rem;font-weight:600}
  pre{white-space:pre-wrap;word-break:break-word;background:#0c0e13;border:1px solid var(--line);
    border-radius:9px;padding:.9rem;margin:.6rem 0 0;max-height:480px;overflow:auto;font:13px/1.5 ui-monospace,Menlo,Consolas,monospace}
+ .prose{margin:.7rem 0 0;max-height:560px;overflow:auto;padding-right:.4rem}
+ .prose h1{font-size:1.3rem;margin:1.1rem 0 .5rem;color:var(--ink)}
+ .prose h2{font-size:1.08rem;margin:1.3rem 0 .4rem;color:var(--accent)}
+ .prose h3{font-size:.98rem;margin:1rem 0 .35rem;color:var(--ink)}
+ .prose h1:first-child,.prose h2:first-child{margin-top:.2rem}
+ .prose p{margin:.55rem 0;color:#cdd2dc}
+ .prose ul,.prose ol{margin:.5rem 0;padding-left:1.3rem}
+ .prose li{margin:.3rem 0;color:#cdd2dc}
+ .prose strong{color:var(--ink)}
+ .prose .tldr{background:rgba(79,140,255,.08);border-left:3px solid var(--accent);
+   border-radius:6px;padding:.7rem .9rem;margin:.2rem 0 .4rem;color:#dfe6f5}
  .full{grid-column:1/-1}
  .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--line);
    border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:.5rem}
@@ -102,6 +113,38 @@ function codeCard(title,id,text,cls){
   return '<div class="card full '+(cls||"")+'"><div class="codehead"><h3>'+title+
     '</h3><button class="copy" data-c="'+id+'">Copy</button></div><pre id="'+id+'">'+esc(text)+'</pre></div>';
 }
+// Minimal, safe Markdown -> HTML for the rewritten draft (headings, lists,
+// paragraphs, bold). Escapes first, so no raw HTML injection.
+function mdToHtml(md){
+  const inline=s=>esc(s).replace(/\\*\\*([^*]+)\\*\\*/g,"<strong>$1</strong>");
+  const lines=md.split(/\\r?\\n/);
+  let html="",list=null,para=[];
+  const flushP=()=>{ if(para.length){ html+="<p>"+inline(para.join(" "))+"</p>"; para=[]; } };
+  const flushL=()=>{ if(list){ html+="</"+list+">"; list=null; } };
+  for(let raw of lines){
+    const line=raw.trim();
+    if(!line){ flushP(); flushL(); continue; }
+    let m;
+    if(m=line.match(/^#\\s+(.*)/)){ flushP();flushL(); html+="<h1>"+inline(m[1])+"</h1>"; }
+    else if(m=line.match(/^##\\s+(.*)/)){ flushP();flushL(); html+="<h2>"+inline(m[1])+"</h2>"; }
+    else if(m=line.match(/^###\\s+(.*)/)){ flushP();flushL(); html+="<h3>"+inline(m[1])+"</h3>"; }
+    else if(m=line.match(/^[-*]\\s+(.*)/)){ flushP(); if(list!=="ul"){flushL();list="ul";html+="<ul>";} html+="<li>"+inline(m[1])+"</li>"; }
+    else if(m=line.match(/^\\d+\\.\\s+(.*)/)){ flushP(); if(list!=="ol"){flushL();list="ol";html+="<ol>";} html+="<li>"+inline(m[1])+"</li>"; }
+    else { flushL(); para.push(line); }
+  }
+  flushP(); flushL();
+  return html;
+}
+function draftCard(md){
+  // First paragraph (before the first heading) is the answer-first TL;DR — highlight it.
+  let body=md, tldr="";
+  const firstH=md.search(/(^|\\n)#/);
+  if(firstH>0){ const pre=md.slice(0,firstH).trim(); if(pre){ tldr='<div class="tldr">'+esc(pre).replace(/\\n+/g," ")+'</div>'; body=md.slice(firstH); } }
+  return '<div class="card full"><div class="codehead"><h3>Optimized draft</h3>'+
+    '<button class="copy" data-c="draftraw">Copy Markdown</button></div>'+
+    '<div class="prose">'+tldr+mdToHtml(body)+'</div>'+
+    '<textarea id="draftraw" style="display:none">'+esc(md)+'</textarea></div>';
+}
 function render(d){
   const safe=d.safe;
   let h='<div class="grid">';
@@ -118,12 +161,13 @@ function render(d){
        '<ul>'+d.claimDiff.added.map(c=>'<li>'+esc(c)+'</li>').join('')+'</ul></div>';
   }
   // JSON-LD is still produced by the API but intentionally not shown in the UI.
-  h+=codeCard('Optimized draft (Markdown)','draft',d.rewrittenDraft);
+  h+=draftCard(d.rewrittenDraft);
   return h;
 }
 function bindCopies(){
   document.querySelectorAll(".copy").forEach(b=>b.onclick=async()=>{
-    await navigator.clipboard.writeText($("#"+b.dataset.c).textContent);
+    const el=$("#"+b.dataset.c);
+    await navigator.clipboard.writeText(el.value!==undefined?el.value:el.textContent);
     const o=b.textContent;b.textContent="Copied ✓";setTimeout(()=>b.textContent=o,1200);
   });
 }
