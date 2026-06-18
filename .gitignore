@@ -4,3 +4,6 @@ cache/
 .env
 *.log
 .gstack/
+_demo/
+demo*.png
+demo-shot.ts
