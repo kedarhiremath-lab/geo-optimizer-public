@@ -199,7 +199,15 @@ app.post("/api/optimize", async (req, res) => {
     const result = await optimize(url, new GeminiProvider());
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    const raw = err instanceof Error ? err.message : String(err);
+    let msg = raw;
+    if (/429|quota|rate.?limit|resource.?exhausted/i.test(raw)) {
+      const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+      msg =
+        `Daily free-tier quota reached for ${model} (Gemini free tier allows ~20 requests/day per model). ` +
+        `Wait for the daily reset (midnight Pacific), switch GEMINI_MODEL in .env to a model you haven't used today, or add billing.`;
+    }
+    res.status(500).json({ error: msg });
   }
 });
 
