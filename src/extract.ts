@@ -53,7 +53,7 @@ export function extractArticle(page: RenderedPage): Article {
   }
 
   const extractedWords = wordCount(parsed.textContent);
-  const ratio = bodyWords > 0 ? extractedWords / bodyWords : 0;
+  const ratio = bodyWords > 0 ? extractedWords / bodyWords : 1;
 
   // Headings + links from the ORIGINAL (uncloned) doc, scoped to the article if found.
   const articleRoot =
@@ -65,10 +65,16 @@ export function extractArticle(page: RenderedPage): Article {
     .map((a) => a.getAttribute("href") ?? "")
     .filter((h) => h.startsWith("http"));
 
-  if (ratio < EXTRACTION_THRESHOLDS.minBodyWordRatio) {
+  if (extractedWords < EXTRACTION_THRESHOLDS.minExtractedWords) {
     throw new ExtractionError(
-      `Extraction fidelity too low for ${page.url}: recovered ${extractedWords}/${bodyWords} words ` +
-        `(${(ratio * 100).toFixed(0)}%, need >= ${EXTRACTION_THRESHOLDS.minBodyWordRatio * 100}%).`,
+      `Extracted article too short for ${page.url}: ${extractedWords} words ` +
+        `(need >= ${EXTRACTION_THRESHOLDS.minExtractedWords}). Extraction likely failed.`,
+    );
+  }
+  if (ratio < EXTRACTION_THRESHOLDS.catastrophicRatio) {
+    throw new ExtractionError(
+      `Extraction recovered almost nothing for ${page.url}: ${extractedWords}/${bodyWords} words ` +
+        `(${(ratio * 100).toFixed(1)}%, below catastrophic floor ${EXTRACTION_THRESHOLDS.catastrophicRatio * 100}%).`,
     );
   }
   if (headings.length < EXTRACTION_THRESHOLDS.minHeadings) {

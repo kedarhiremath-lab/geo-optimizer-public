@@ -21,6 +21,25 @@ import type { RenderedPage } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Direct-Playwright render fallback (eng review #7 — don't depend solely on the
+ * gstack browse.exe binary). Node launches Chromium reliably on Windows.
+ */
+async function renderWithPlaywright(url: string, timeoutMs: number): Promise<string> {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs }).catch(async () => {
+      // networkidle can stall on chatty pages; fall back to domcontentloaded.
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+    });
+    return await page.content();
+  } finally {
+    await browser.close();
+  }
+}
+
 const CACHE_DIR = join(process.cwd(), "cache");
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MIN_HTML_BYTES = 500;
@@ -70,18 +89,23 @@ export async function fetchRendered(url: string, opts: FetchOptions = {}): Promi
     }
   }
 
-  const bin = resolveBrowseBin();
-  const run = (args: string[]) =>
-    execFileAsync(bin, args, { timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
-
   try {
-    await run(["goto", url]);
-    // Wix lazy-loads on scroll/idle; give the network a moment to settle.
-    await run(["wait", "--networkidle"]).catch(() => {
-      /* networkidle can time out on chatty pages; the DOM is usually ready anyway */
-    });
-    const { stdout } = await run(["html"]);
-    const html = stdout;
+    let html = "";
+    // Primary: gstack browse.exe if present and working.
+    try {
+      const bin = resolveBrowseBin();
+      const run = (args: string[]) =>
+        execFileAsync(bin, args, { timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
+      await run(["goto", url]);
+      await run(["wait", "--networkidle"]).catch(() => {
+        /* networkidle can time out; DOM is usually ready anyway */
+      });
+      html = (await run(["html"])).stdout;
+    } catch (browseErr) {
+      // Fallback: direct Playwright render (eng review #7).
+      html = await renderWithPlaywright(url, timeoutMs);
+    }
+
     if (!html || html.length < MIN_HTML_BYTES) {
       throw new Error(`Rendered HTML for ${url} is suspiciously small (${html?.length ?? 0} bytes).`);
     }

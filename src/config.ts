@@ -28,8 +28,17 @@ export const TROSSEN_BLUEPRINT_CONFIG: OptimizerConfig = {
   ],
 };
 
-/** Extraction fail-loud thresholds (from eng review). */
+// Extraction fail-loud thresholds (from eng review).
+//
+// NOTE: the original "extracted >= 60% of full body text" ratio is wrong for
+// CMS pages like Wix, where nav/footer/related-posts/comments dominate
+// body.textContent — a correctly-extracted article is often only ~30% of it.
+// So we guard on (a) an ABSOLUTE article floor (did we get a real article?)
+// and (b) a CATASTROPHIC ratio floor (Readability returned almost nothing),
+// plus headings preserved. This catches real extraction failure without
+// false-failing on chrome-heavy pages.
 export const EXTRACTION_THRESHOLDS = {
-  minBodyWordRatio: 0.6, // extracted text >= 60% of visible body word count
+  minExtractedWords: 250, // a real article has at least this much body
+  catastrophicRatio: 0.05, // < 5% of body text means extraction basically failed
   minHeadings: 3,
 };

@@ -6,6 +6,7 @@
   "description": "Trossen GEO/SEO content optimizer — Milestone 1 (optimizer core)",
   "scripts": {
     "optimize": "tsx src/cli.ts",
+    "inspect": "tsx inspect.ts",
     "ui": "tsx src/ui/server.ts",
     "test": "vitest run",
     "eval": "tsx eval/run.ts",
@@ -15,7 +16,8 @@
     "@google/generative-ai": "^0.21.0",
     "@mozilla/readability": "^0.5.0",
     "express": "^4.21.2",
-    "jsdom": "^25.0.1"
+    "jsdom": "^25.0.1",
+    "playwright": "^1.61.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
