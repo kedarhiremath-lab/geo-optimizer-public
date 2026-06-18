@@ -37,38 +37,43 @@ function tokens(s: string): Set<string> {
 }
 
 /** A rewrite claim is "supported" if a source claim shares >= 70% of its tokens. */
-function isSupported(rewriteClaim: string, sourceClaims: string[]): boolean {
+/**
+ * A rewrite claim is "supported" when most of its content words appear in the
+ * SOURCE TEXT itself. Matching against the raw source (not a lossy re-extraction
+ * of source claims) is what keeps false positives down: a claim that's faithfully
+ * carried over will have its content words present in the source.
+ */
+function isSupportedByText(rewriteClaim: string, sourceTokenSet: Set<string>): boolean {
   const rt = tokens(rewriteClaim);
   if (rt.size === 0) return true;
-  for (const sc of sourceClaims) {
-    const st = tokens(sc);
-    let overlap = 0;
-    for (const t of rt) if (st.has(t)) overlap++;
-    if (overlap / rt.size >= 0.7) return true;
-  }
-  return false;
+  let overlap = 0;
+  for (const t of rt) if (sourceTokenSet.has(t)) overlap++;
+  // 0.8: a genuinely new fact introduces multiple content words absent from the
+  // source; a rephrased existing claim shares almost all of its words.
+  return overlap / rt.size >= 0.8;
 }
 
 const PLACEHOLDER = /\[ADD [^\]]*\]/i;
+// Page chrome Readability sometimes leaks in (Wix meta). Not article claims.
+const CHROME = /^\s*(\d+\s*min read|jun|jan|feb|mar|apr|may|jul|aug|sep|oct|nov|dec)\b/i;
 
 export async function claimDiff(
   provider: LlmProvider,
   sourceText: string,
   rewriteText: string,
 ): Promise<ClaimDiffResult> {
-  const [sourceRaw, rewriteRaw] = await Promise.all([
-    provider.complete(claimExtractionPrompt(sourceText)),
-    provider.complete(claimExtractionPrompt(rewriteText)),
-  ]);
-  const sourceClaims = parseClaims(sourceRaw);
+  // Only extract claims from the REWRITE; check each against the source text.
+  // (One LLM call instead of two, and far fewer false positives.)
+  const rewriteRaw = await provider.complete(claimExtractionPrompt(rewriteText));
   const rewriteClaims = parseClaims(rewriteRaw);
+  const sourceTokenSet = tokens(sourceText);
 
   const added = rewriteClaims.filter(
-    (c) => !PLACEHOLDER.test(c) && !isSupported(c, sourceClaims),
+    (c) => !PLACEHOLDER.test(c) && !CHROME.test(c) && !isSupportedByText(c, sourceTokenSet),
   );
 
   return { added, passed: added.length === 0 };
 }
 
 // Exposed for unit testing the deterministic matcher without an LLM call.
-export const _internal = { parseClaims, isSupported, tokens };
+export const _internal = { parseClaims, isSupportedByText, tokens };

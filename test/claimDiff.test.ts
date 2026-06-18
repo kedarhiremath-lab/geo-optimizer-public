@@ -3,43 +3,43 @@ import { claimDiff, _internal } from "../src/claimDiff.js";
 import type { LlmProvider } from "../src/types.js";
 import { claimExtractionPrompt } from "../src/prompts.js";
 
-describe("claimDiff deterministic matcher", () => {
-  it("treats a claim as supported when tokens overlap >= 70%", () => {
-    expect(_internal.isSupported("Trossen SDK supports ROS 2", ["The Trossen SDK supports ROS 2 natively"])).toBe(true);
+describe("claimDiff deterministic matcher (against source text)", () => {
+  it("treats a claim as supported when its words are present in the source text", () => {
+    const src = _internal.tokens("The Trossen SDK supports ROS 2 natively for robot arms");
+    expect(_internal.isSupportedByText("Trossen SDK supports ROS 2", src)).toBe(true);
   });
-  it("flags an unrelated claim as unsupported", () => {
-    expect(_internal.isSupported("deployment takes 6 weeks", ["Trossen builds robot arms"])).toBe(false);
+  it("flags a claim whose words are absent from the source", () => {
+    const src = _internal.tokens("Trossen builds robot arms");
+    expect(_internal.isSupportedByText("deployment takes 6 weeks and is 10x faster", src)).toBe(false);
   });
 });
 
-// Fake provider returns canned claim arrays based on which text it was asked about.
-function fakeProvider(map: Record<string, string[]>): LlmProvider {
-  return {
-    name: "fake",
-    async complete(prompt: string) {
-      const key = Object.keys(map).find((k) => prompt.includes(k));
-      return JSON.stringify(key ? map[key] : []);
-    },
-  };
+// Fake provider returns canned claims for the REWRITE extraction call only.
+function fakeProvider(rewriteClaims: string[]): LlmProvider {
+  return { name: "fake", async complete() { return JSON.stringify(rewriteClaims); } };
 }
 
 describe("claimDiff guardrail", () => {
-  it("PASSES when rewrite adds no new facts", async () => {
-    const p = fakeProvider({ "SRC": ["robots are useful", "Trossen SDK supports ROS 2"], "REW": ["Trossen SDK supports ROS 2"] });
-    const r = await claimDiff(p, "SRC text", "REW text");
+  const SOURCE = "Trossen builds robot arms. The Trossen SDK supports ROS 2 and LeRobot.";
+
+  it("PASSES when every rewrite claim is grounded in the source text", async () => {
+    const r = await claimDiff(fakeProvider(["Trossen SDK supports ROS 2"]), SOURCE, "rewrite");
     expect(r.passed).toBe(true);
   });
 
   it("FAILS when rewrite invents a statistic (the reputational guardrail)", async () => {
-    const p = fakeProvider({ "SRC": ["Trossen builds arms"], "REW": ["Trossen builds arms", "deployment is 10x faster than competitors"] });
-    const r = await claimDiff(p, "SRC text", "REW text");
+    const r = await claimDiff(fakeProvider(["deployment is 10x faster than competitors"]), SOURCE, "rewrite");
     expect(r.passed).toBe(false);
     expect(r.added.some((c) => c.includes("10x"))).toBe(true);
   });
 
   it("does NOT flag allowed [ADD STAT:] placeholders as invented facts", async () => {
-    const p = fakeProvider({ "SRC": ["Trossen builds arms"], "REW": ["Trossen builds arms", "[ADD STAT: throughput source needed]"] });
-    const r = await claimDiff(p, "SRC text", "REW text");
+    const r = await claimDiff(fakeProvider(["[ADD STAT: throughput source needed]"]), SOURCE, "rewrite");
+    expect(r.passed).toBe(true);
+  });
+
+  it("does NOT flag leaked page chrome (e.g. '25 min read', 'Jun 8')", async () => {
+    const r = await claimDiff(fakeProvider(["25 min read", "Jun 8"]), SOURCE, "rewrite");
     expect(r.passed).toBe(true);
   });
 
