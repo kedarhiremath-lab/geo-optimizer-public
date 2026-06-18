@@ -85,14 +85,19 @@ export function extractArticle(page: RenderedPage): Article {
   }
 
   // Build a markdown-ish content string with headings marked, for the LLM.
+  // Chrome (audio widget, read-time, byline date, share/subscribe) is stripped
+  // so it pollutes neither the rewrite nor the fact-preservation guardrail.
   const content = buildMarkdownish(articleRoot);
+  // Derive the plain text from the cleaned content so text + content agree and
+  // both are chrome-free (parsed.textContent still carries the chrome).
+  const text = content.replace(/^#{1,3}\s+/gm, "").replace(/^- /gm, "").trim();
 
   return {
     url: page.url,
     title: parsed.title?.trim() || meta.title || "Untitled",
-    text: parsed.textContent.trim(),
+    text,
     content,
-    headings,
+    headings: headings.filter((h) => !isChrome(h)),
     links: Array.from(new Set(links)),
     existingJsonLd,
     meta,
@@ -101,13 +106,29 @@ export function extractArticle(page: RenderedPage): Article {
   };
 }
 
+// Lines Readability pulls from Wix chrome that are not article content.
+const CHROME_PATTERNS: RegExp[] = [
+  /^listen to the audio version/i,
+  /^\d+\s*min read$/i,
+  /^\d+\s*(views?|likes?|comments?)$/i,
+  /^(share|subscribe|sign up|follow us|recent posts|related posts|comments?)\b/i,
+  /^[A-Z][a-z]{2}\s+\d{1,2}(,\s*\d{4})?$/, // standalone date byline e.g. "Jun 8"
+  /^\d{1,2}\s+min$/i,
+];
+
+function isChrome(line: string): boolean {
+  const t = line.trim();
+  if (!t) return true;
+  return CHROME_PATTERNS.some((re) => re.test(t));
+}
+
 /** Flatten an element into headings (## ) + paragraphs so the LLM sees structure. */
 function buildMarkdownish(root: Element | null): string {
   if (!root) return "";
   const out: string[] = [];
   root.querySelectorAll("h1,h2,h3,p,li").forEach((el) => {
     const t = el.textContent?.trim();
-    if (!t) return;
+    if (!t || isChrome(t)) return;
     const tag = el.tagName.toLowerCase();
     if (tag === "h1") out.push(`# ${t}`);
     else if (tag === "h2") out.push(`## ${t}`);

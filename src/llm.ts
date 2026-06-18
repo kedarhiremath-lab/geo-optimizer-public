@@ -50,10 +50,14 @@ export class GeminiProvider implements LlmProvider {
 
 /**
  * Run a long article through the model in chunks when it exceeds a safe size,
- * so we never silently truncate (eng review failure mode). For M1 the Blueprint
- * post fits in one call; chunking is the guard for longer posts.
+ * so we never silently truncate (eng review failure mode).
+ *
+ * Gemini 2.5 Flash has a ~1M-token context, so a typical blog post fits in a
+ * SINGLE call. We set the limit at ~180k chars (~45k tokens) — generous enough
+ * that real posts never chunk (one call, no quality seams, half the free-tier
+ * quota), while still guarding against a pathologically huge document.
  */
-const SINGLE_CALL_CHAR_LIMIT = 24_000;
+const SINGLE_CALL_CHAR_LIMIT = 180_000;
 
 export async function completeLong(
   provider: LlmProvider,

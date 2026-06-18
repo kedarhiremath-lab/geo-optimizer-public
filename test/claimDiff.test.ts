@@ -4,13 +4,20 @@ import type { LlmProvider } from "../src/types.js";
 import { claimExtractionPrompt } from "../src/prompts.js";
 
 describe("claimDiff deterministic matcher (against source text)", () => {
+  const supported = (claim: string, src: string) =>
+    _internal.isSupportedByText(claim, src, _internal.tokens(src));
+
   it("treats a claim as supported when its words are present in the source text", () => {
-    const src = _internal.tokens("The Trossen SDK supports ROS 2 natively for robot arms");
-    expect(_internal.isSupportedByText("Trossen SDK supports ROS 2", src)).toBe(true);
+    expect(supported("Trossen SDK supports ROS 2", "The Trossen SDK supports ROS 2 natively for robot arms")).toBe(true);
   });
   it("flags a claim whose words are absent from the source", () => {
-    const src = _internal.tokens("Trossen builds robot arms");
-    expect(_internal.isSupportedByText("deployment takes 6 weeks and is 10x faster", src)).toBe(false);
+    expect(supported("quantum tunneling enables teleportation", "Trossen builds robot arms")).toBe(false);
+  });
+  it("flags an invented statistic even when the prose words match (number gate)", () => {
+    expect(supported("deployment is 10x faster", "deployment is faster with Trossen")).toBe(false);
+  });
+  it("passes a stat that IS in the source", () => {
+    expect(supported("scores range from 0 to 3", "each category scores from 0 to 3 points")).toBe(true);
   });
 });
 

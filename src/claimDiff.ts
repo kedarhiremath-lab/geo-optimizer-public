@@ -37,20 +37,36 @@ function tokens(s: string): Set<string> {
 }
 
 /** A rewrite claim is "supported" if a source claim shares >= 70% of its tokens. */
+/** Numeric/stat tokens — the highest-risk fabrications (invented stats).
+ *  Matches any digit run so "10x", "10%", "6 weeks", "99.9" are all caught. */
+function numericTokens(s: string): string[] {
+  return (s.match(/\d+(?:[.,]\d+)?/g) ?? []).map((n) => n.replace(/,/g, ""));
+}
+
 /**
- * A rewrite claim is "supported" when most of its content words appear in the
- * SOURCE TEXT itself. Matching against the raw source (not a lossy re-extraction
- * of source claims) is what keeps false positives down: a claim that's faithfully
- * carried over will have its content words present in the source.
+ * A rewrite claim is "supported" when it's grounded in the SOURCE TEXT. Two
+ * independent gates, both must hold:
+ *   1. Every NUMBER/stat in the claim appears in the source (a fabricated stat
+ *      is the worst reputational case — caught hard).
+ *   2. Most of the claim's content WORDS appear in the source (catches invented
+ *      named facts / citations), while tolerating rephrasing.
+ * Matching against the raw source text (not a lossy re-extraction of source
+ * claims) is what keeps the false-positive rate low.
  */
-function isSupportedByText(rewriteClaim: string, sourceTokenSet: Set<string>): boolean {
+function isSupportedByText(rewriteClaim: string, sourceText: string, sourceTokenSet: Set<string>): boolean {
+  // Gate 1: numbers must exist in the source.
+  const srcNums = new Set(numericTokens(sourceText));
+  for (const n of numericTokens(rewriteClaim)) {
+    if (!srcNums.has(n)) return false; // invented number -> unsupported
+  }
+  // Gate 2: content-word overlap.
   const rt = tokens(rewriteClaim);
   if (rt.size === 0) return true;
   let overlap = 0;
   for (const t of rt) if (sourceTokenSet.has(t)) overlap++;
-  // 0.8: a genuinely new fact introduces multiple content words absent from the
-  // source; a rephrased existing claim shares almost all of its words.
-  return overlap / rt.size >= 0.8;
+  // 0.6 tolerates rephrasing words ("range", "leverage") now that the number
+  // gate above independently catches the high-risk fabrications (invented stats).
+  return overlap / rt.size >= 0.6;
 }
 
 const PLACEHOLDER = /\[ADD [^\]]*\]/i;
@@ -69,11 +85,11 @@ export async function claimDiff(
   const sourceTokenSet = tokens(sourceText);
 
   const added = rewriteClaims.filter(
-    (c) => !PLACEHOLDER.test(c) && !CHROME.test(c) && !isSupportedByText(c, sourceTokenSet),
+    (c) => !PLACEHOLDER.test(c) && !CHROME.test(c) && !isSupportedByText(c, sourceText, sourceTokenSet),
   );
 
   return { added, passed: added.length === 0 };
 }
 
 // Exposed for unit testing the deterministic matcher without an LLM call.
-export const _internal = { parseClaims, isSupportedByText, tokens };
+export const _internal = { parseClaims, isSupportedByText, tokens, numericTokens };

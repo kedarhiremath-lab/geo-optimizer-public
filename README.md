@@ -39,6 +39,11 @@ npm run eval                 # independent quality eval on the Blueprint post
 - **Free-tier only.** Gemini free tier has no Search grounding — fine here, since
   the optimizer only analyzes/rewrites. Automated GEO *measurement* (M2) needs
   grounding and is deferred.
+- **Free-tier daily quota.** `gemini-2.5-flash` free tier allows ~20 requests/day.
+  Each optimize run uses 2 calls (rewrite + claim extraction), so ~10 posts/day.
+  If you hit the cap you'll see a clear `429 ... free_tier_requests` error — wait
+  for the daily reset, or set `GEMINI_MODEL=gemini-2.5-flash-lite` in `.env` for a
+  higher free allowance, or add billing for production use.
 - **Fact-preservation guardrail.** The rewrite must not introduce any stat or
   claim absent from the source; a claim-diff enforces this (`safe: false` on
   violation). Critical for a commercial page.
