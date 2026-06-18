@@ -117,11 +117,7 @@ function render(d){
        '<p style="color:var(--muted);margin:.2rem 0 .6rem">These appear in the rewrite but were not clearly grounded in the source. Confirm each is true (or remove it) — the optimizer will not invent facts for you.</p>'+
        '<ul>'+d.claimDiff.added.map(c=>'<li>'+esc(c)+'</li>').join('')+'</ul></div>';
   }
-  if(d.jsonLdNotes.length){
-    h+='<div class="card full"><h3>JSON-LD notes</h3><ul style="margin:0;padding-left:1.1rem;color:var(--muted)">'+
-       d.jsonLdNotes.map(n=>'<li>'+esc(n)+'</li>').join('')+'</ul></div>';
-  }
-  h+=codeCard('Structured data — JSON-LD ('+(d.jsonLdValid?'valid':'INVALID')+')','jsonld',JSON.stringify(d.jsonLd,null,2));
+  // JSON-LD is still produced by the API but intentionally not shown in the UI.
   h+=codeCard('Optimized draft (Markdown)','draft',d.rewrittenDraft);
   return h;
 }
