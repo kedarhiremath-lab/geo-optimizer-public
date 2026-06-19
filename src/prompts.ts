@@ -3,14 +3,24 @@
 // eval harness in eval/run.ts guards against it).
 
 import type { Article, FixItem, OptimizerConfig } from "./types.js";
+import { formatAnswers, type InterviewAnswers } from "./interview.js";
 
 /**
  * Rewrite prompt. The fact-preservation constraint is the reputational
  * guardrail (eng review #2): the model MUST NOT introduce any claim, statistic,
  * or citation that is not present in the source. This is on a commercial page.
+ *
+ * If the author answered the skills interview, their direction is woven in as
+ * the highest-priority editorial guidance (subordinate only to fact-preservation).
  */
-export function rewritePrompt(article: Article, config: OptimizerConfig, fixList: FixItem[]): string {
+export function rewritePrompt(
+  article: Article,
+  config: OptimizerConfig,
+  fixList: FixItem[],
+  answers?: InterviewAnswers,
+): string {
   const fixes = fixList.map((f, i) => `${i + 1}. ${f.label}: ${f.recommendation}`).join("\n");
+  const direction = answers ? formatAnswers(answers) : "";
   return [
     "You are a GEO/SEO content optimizer for a commercial robotics company.",
     "Rewrite the article below to improve how it ranks in search engines AND how AI assistants",
@@ -33,6 +43,12 @@ export function rewritePrompt(article: Article, config: OptimizerConfig, fixList
     "",
     "PRIORITIZED FIXES TO APPLY:",
     fixes || "(none — content already strong; focus on structure)",
+    "",
+    direction
+      ? "AUTHOR'S EDITORIAL DIRECTION (highest priority after the hard constraints above —\n" +
+        "honor these specific instructions about audience, thesis, structure, and requirements):\n" +
+        direction
+      : "",
     "",
     "Output ONLY the rewritten article in Markdown (headings, paragraphs, lists). No commentary.",
     "",

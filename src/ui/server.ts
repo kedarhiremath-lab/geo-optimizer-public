@@ -1,11 +1,13 @@
-// T8 — One-page local web UI: paste a post URL, see fix-list + draft + JSON-LD.
+// Local web UI: paste URL -> analyze (baseline + skills interview) -> answer ->
+// optimize (LLM rewrite weaving in answers) -> before/after score + draft.
 // Internal tool, runs locally (no auth, no hosting — out of scope for M1).
 
 import express from "express";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { optimize } from "../optimize.js";
+import { analyze, optimize } from "../optimize.js";
 import { GeminiProvider } from "../llm.js";
+import { INTERVIEW_LENSES } from "../interview.js";
 
 function loadEnv(): void {
   const p = join(process.cwd(), ".env");
@@ -18,7 +20,7 @@ function loadEnv(): void {
 loadEnv();
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
 const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -35,12 +37,13 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
  .bar{display:flex;gap:.5rem}
  input{flex:1;padding:.7rem .85rem;font-size:1rem;background:var(--panel);
    border:1px solid var(--line);border-radius:9px;color:var(--ink)}
- input:focus{outline:none;border-color:var(--accent)}
+ input:focus,textarea:focus{outline:none;border-color:var(--accent)}
  button{padding:.7rem 1.2rem;font-size:1rem;font-weight:600;cursor:pointer;
    background:var(--accent);color:#fff;border:0;border-radius:9px}
  button:disabled{opacity:.5;cursor:default}
+ button.secondary{background:transparent;border:1px solid var(--line);color:var(--muted)}
  .status{color:var(--muted);margin:.9rem 0;min-height:1.2em}
- .status.err{color:var(--bad)}
+ .status.err{color:var(--bad);white-space:pre-wrap}
  .grid{display:grid;grid-template-columns:170px 1fr;gap:1rem;margin-top:1.2rem}
  @media(max-width:680px){.grid{grid-template-columns:1fr}}
  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.1rem 1.2rem}
@@ -78,50 +81,117 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
  .prose .tldr{background:rgba(79,140,255,.08);border-left:3px solid var(--accent);
    border-radius:6px;padding:.7rem .9rem;margin:.2rem 0 .4rem;color:#dfe6f5}
  .full{grid-column:1/-1}
+ .lens{margin:.2rem 0 1rem}
+ .lens .lenshead{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap}
+ .lens .lensname{font-weight:700;color:var(--ink)}
+ .lens .skilltag{font-size:.72rem;color:var(--accent);background:rgba(79,140,255,.1);padding:.1rem .45rem;border-radius:5px}
+ .lens .lensintent{color:var(--muted);font-size:.85rem;margin:.15rem 0 .6rem}
+ .q{margin:.7rem 0}
+ .q label{display:block;color:#cdd2dc;margin-bottom:.3rem;font-size:.92rem}
+ .q textarea{width:100%;min-height:48px;resize:vertical;padding:.55rem .7rem;font:14px/1.45 inherit;
+   background:#0c0e13;border:1px solid var(--line);border-radius:8px;color:var(--ink)}
+ .interview-actions{display:flex;gap:.6rem;align-items:center;margin-top:.6rem}
+ .hint{color:var(--muted);font-size:.85rem}
  .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--line);
    border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:.5rem}
  @keyframes spin{to{transform:rotate(360deg)}}
+ .step{font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:1.6rem 0 .4rem}
 </style></head><body><div class="wrap">
 <header>
  <h1>Trossen GEO/SEO Optimizer</h1>
- <p>Score a blog post for search + AI-assistant visibility, get a prioritized fix-list and an optimized draft.</p>
+ <p>Score a post, answer a short skills interview, get an optimized draft tuned to your answers.</p>
 </header>
 <div class="bar">
  <input id="url" placeholder="https://www.trossenrobotics.com/post/…"
    value="https://www.trossenrobotics.com/post/the-physical-ai-deployment-blueprint-from-pilot-to-commercial-reality"/>
- <button id="go">Optimize</button>
+ <button id="analyze">Analyze</button>
 </div>
 <div id="status" class="status"></div>
+<div id="baseline"></div>
+<div id="interview"></div>
 <div id="out"></div>
 </div>
 <script>
 const $=s=>document.querySelector(s);
+let CTX={url:"",lenses:[]};
 function esc(s){return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
 function scoreColor(n){return n>=70?"var(--good)":n>=45?"var(--warn)":"var(--bad)";}
-$("#go").onclick=run;
-$("#url").addEventListener("keydown",e=>{if(e.key==="Enter")run();});
-async function run(){
+
+$("#analyze").onclick=doAnalyze;
+$("#url").addEventListener("keydown",e=>{if(e.key==="Enter")doAnalyze();});
+
+async function doAnalyze(){
   const url=$("#url").value.trim(); if(!url)return;
-  $("#go").disabled=true;
+  CTX.url=url;
+  $("#analyze").disabled=true; $("#status").className="status";
+  $("#status").innerHTML='<span class="spinner"></span>Rendering and scoring the post (no AI call yet)…';
+  $("#baseline").innerHTML=""; $("#interview").innerHTML=""; $("#out").innerHTML="";
+  try{
+    const r=await fetch("/api/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url})});
+    const d=await r.json(); if(!r.ok)throw new Error(d.error||"failed");
+    CTX.lenses=d.lenses;
+    $("#status").innerHTML="";
+    $("#baseline").innerHTML=renderBaseline(d);
+    $("#interview").innerHTML=renderInterview(d.lenses);
+    $("#gen").onclick=doOptimize;
+  }catch(e){$("#status").className="status err";$("#status").textContent=e.message;}
+  finally{$("#analyze").disabled=false;}
+}
+
+function renderBaseline(d){
+  let h='<div class="step">Step 1 · Baseline</div><div class="grid">';
+  h+='<div class="card ring"><h3>GEO/SEO score</h3><div class="score" style="color:'+scoreColor(d.baselineScore)+'">'+
+     d.baselineScore+'<small>/100</small></div><div class="hint">original</div></div>';
+  h+='<div class="card"><h3>Gaps found</h3><ol class="fixes">'+
+     d.fixList.map(f=>'<li><b>'+esc(f.label)+'</b> <span>— '+esc(f.recommendation)+'</span></li>').join('')+
+     (d.fixList.length?'':'<li>No gaps — content already strong.</li>')+'</ol></div></div>';
+  return h;
+}
+
+function renderInterview(lenses){
+  let h='<div class="step">Step 2 · Skills interview</div>';
+  h+='<div class="card full"><p class="hint" style="margin:.1rem 0 1rem">Answer what you can — blanks are skipped. Each section is a gstack skill lens. Your answers steer the rewrite.</p>';
+  for(const lens of lenses){
+    h+='<div class="lens"><div class="lenshead"><span class="lensname">'+esc(lens.label)+
+       '</span><span class="skilltag">/'+esc(lens.skill)+'</span></div>'+
+       '<div class="lensintent">'+esc(lens.intent)+'</div>';
+    for(const q of lens.questions){
+      h+='<div class="q"><label for="'+q.id+'">'+esc(q.q)+'</label>'+
+         '<textarea id="'+q.id+'" placeholder="'+esc(q.placeholder)+'"></textarea></div>';
+    }
+    h+='</div>';
+  }
+  h+='<div class="interview-actions"><button id="gen">Generate optimized article</button>'+
+     '<span class="hint">Uses one AI call.</span></div></div>';
+  return h;
+}
+
+function collectAnswers(){
+  const a={};
+  for(const lens of CTX.lenses) for(const q of lens.questions){
+    const el=document.getElementById(q.id); if(el&&el.value.trim())a[q.id]=el.value.trim();
+  }
+  return a;
+}
+
+async function doOptimize(){
+  const answers=collectAnswers();
+  $("#gen").disabled=true;
   $("#status").className="status";
-  $("#status").innerHTML='<span class="spinner"></span>Rendering page, scoring, and rewriting via free-tier LLM (~20–50s)…';
+  $("#status").innerHTML='<span class="spinner"></span>Rewriting with your answers (free-tier AI, ~20–60s)…';
   $("#out").innerHTML="";
   try{
-    const r=await fetch("/api/optimize",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url})});
-    const d=await r.json();
-    if(!r.ok)throw new Error(d.error||"failed");
+    const r=await fetch("/api/optimize",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({url:CTX.url,answers})});
+    const d=await r.json(); if(!r.ok)throw new Error(d.error||"failed");
     $("#status").innerHTML="";
-    $("#out").innerHTML=render(d);
+    $("#out").innerHTML='<div class="step">Step 3 · Optimized result</div>'+renderResult(d);
     bindCopies();
+    $("#out").scrollIntoView({behavior:"smooth",block:"start"});
   }catch(e){$("#status").className="status err";$("#status").textContent=e.message;}
-  finally{$("#go").disabled=false;}
+  finally{$("#gen").disabled=false;}
 }
-function codeCard(title,id,text,cls){
-  return '<div class="card full '+(cls||"")+'"><div class="codehead"><h3>'+title+
-    '</h3><button class="copy" data-c="'+id+'">Copy</button></div><pre id="'+id+'">'+esc(text)+'</pre></div>';
-}
-// Minimal, safe Markdown -> HTML for the rewritten draft (headings, lists,
-// paragraphs, bold). Escapes first, so no raw HTML injection.
+
 function mdToHtml(md){
   const inline=s=>esc(s).replace(/\\*\\*([^*]+)\\*\\*/g,"<strong>$1</strong>");
   const lines=md.split(/\\r?\\n/);
@@ -143,7 +213,6 @@ function mdToHtml(md){
   return html;
 }
 function draftCard(md){
-  // First paragraph (before the first heading) is the answer-first TL;DR — highlight it.
   let body=md, tldr="";
   const firstH=md.search(/(^|\\n)#/);
   if(firstH>0){ const pre=md.slice(0,firstH).trim(); if(pre){ tldr='<div class="tldr">'+esc(pre).replace(/\\n+/g," ")+'</div>'; body=md.slice(firstH); } }
@@ -152,29 +221,21 @@ function draftCard(md){
     '<div class="prose">'+tldr+mdToHtml(body)+'</div>'+
     '<textarea id="draftraw" style="display:none">'+esc(md)+'</textarea></div>';
 }
-function render(d){
-  const safe=d.safe;
-  const delta=d.optimizedScore-d.baselineScore;
-  const deltaStr=(delta>=0?"+":"")+delta;
+function renderResult(d){
+  const safe=d.safe, delta=d.optimizedScore-d.baselineScore, ds=(delta>=0?"+":"")+delta;
   let h='<div class="grid">';
-  h+='<div class="card ring"><h3>GEO/SEO score</h3>'+
-     '<div class="beforeafter">'+
-       '<span class="b4">'+d.baselineScore+'</span>'+
-       '<span class="arrow">→</span>'+
-       '<span class="after" style="color:'+scoreColor(d.optimizedScore)+'">'+d.optimizedScore+'<small>/100</small></span>'+
-     '</div>'+
-     '<div class="delta '+(delta>=0?"up":"down")+'">'+deltaStr+' points</div>'+
+  h+='<div class="card ring"><h3>GEO/SEO score</h3><div class="beforeafter">'+
+     '<span class="b4">'+d.baselineScore+'</span><span class="arrow">→</span>'+
+     '<span class="after" style="color:'+scoreColor(d.optimizedScore)+'">'+d.optimizedScore+'<small>/100</small></span></div>'+
+     '<div class="delta '+(delta>=0?"up":"down")+'">'+ds+' points</div>'+
      '<div class="badge '+(safe?"ok":"no")+'">'+(safe?"✓ safe to use":"⚠ needs review")+'</div></div>';
-  h+='<div class="card"><h3>Prioritized fix-list</h3><ol class="fixes">'+
-     d.fixList.map(f=>'<li><b>'+esc(f.label)+'</b> <span>— '+esc(f.recommendation)+'</span></li>').join('')+
-     (d.fixList.length?'':'<li>No gaps found — content already strong.</li>')+'</ol></div>';
-  h+='</div>';
+  h+='<div class="card"><h3>Fixes applied</h3><ol class="fixes">'+
+     d.fixList.map(f=>'<li><b>'+esc(f.label)+'</b></li>').join('')+'</ol></div></div>';
   if(!d.claimDiff.passed){
     h+='<div class="card full flag"><h3>⚠ Claims to verify before publishing</h3>'+
-       '<p style="color:var(--muted);margin:.2rem 0 .6rem">These appear in the rewrite but were not clearly grounded in the source. Confirm each is true (or remove it) — the optimizer will not invent facts for you.</p>'+
+       '<p class="hint" style="margin:.2rem 0 .6rem">In the rewrite but not clearly grounded in the source — confirm or remove each.</p>'+
        '<ul>'+d.claimDiff.added.map(c=>'<li>'+esc(c)+'</li>').join('')+'</ul></div>';
   }
-  // JSON-LD is still produced by the API but intentionally not shown in the UI.
   h+=draftCard(d.rewrittenDraft);
   return h;
 }
@@ -189,25 +250,47 @@ function bindCopies(){
 
 app.get("/", (_req, res) => res.type("html").send(PAGE));
 
-app.post("/api/optimize", async (req, res) => {
+function badUrl(url: string): boolean {
+  return !/^https?:\/\//.test(url);
+}
+
+function quotaMessage(raw: string): string {
+  if (/429|quota|rate.?limit|resource.?exhausted/i.test(raw)) {
+    const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    return (
+      `Daily free-tier quota reached for ${model} (Gemini free tier allows ~20 requests/day per model). ` +
+      `Wait for the daily reset (midnight Pacific), switch GEMINI_MODEL in .env to a model you haven't used today, or add billing.`
+    );
+  }
+  return raw;
+}
+
+app.post("/api/analyze", async (req, res) => {
   const url = (req.body?.url ?? "").toString().trim();
-  if (!/^https?:\/\//.test(url)) {
+  if (badUrl(url)) {
     res.status(400).json({ error: "Provide a valid http(s) URL." });
     return;
   }
   try {
-    const result = await optimize(url, new GeminiProvider());
+    const a = await analyze(url);
+    res.json({ ...a, lenses: INTERVIEW_LENSES });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+app.post("/api/optimize", async (req, res) => {
+  const url = (req.body?.url ?? "").toString().trim();
+  const answers = (req.body?.answers ?? {}) as Record<string, string>;
+  if (badUrl(url)) {
+    res.status(400).json({ error: "Provide a valid http(s) URL." });
+    return;
+  }
+  try {
+    const result = await optimize(url, new GeminiProvider(), { answers });
     res.json(result);
   } catch (err) {
-    const raw = err instanceof Error ? err.message : String(err);
-    let msg = raw;
-    if (/429|quota|rate.?limit|resource.?exhausted/i.test(raw)) {
-      const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-      msg =
-        `Daily free-tier quota reached for ${model} (Gemini free tier allows ~20 requests/day per model). ` +
-        `Wait for the daily reset (midnight Pacific), switch GEMINI_MODEL in .env to a model you haven't used today, or add billing.`;
-    }
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: quotaMessage(err instanceof Error ? err.message : String(err)) });
   }
 });
 

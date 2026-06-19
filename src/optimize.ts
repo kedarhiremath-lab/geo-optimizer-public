@@ -11,9 +11,32 @@ import { claimDiff } from "./claimDiff.js";
 import { buildJsonLd } from "./schema.js";
 import { TROSSEN_BLUEPRINT_CONFIG } from "./config.js";
 import type { LlmProvider, OptimizeResult, OptimizerConfig } from "./types.js";
+import type { InterviewAnswers } from "./interview.js";
 
 export interface OptimizeOptions extends FetchOptions {
   config?: OptimizerConfig;
+  /** Answers from the skills interview, woven into the rewrite as editorial direction. */
+  answers?: InterviewAnswers;
+}
+
+export interface AnalyzeResult {
+  url: string;
+  title: string;
+  baselineScore: number;
+  fixList: ReturnType<typeof buildFixList>;
+}
+
+/**
+ * Step 1 (no LLM, no quota): fetch + extract + score the original. Used by the
+ * UI to show the baseline and the skills interview before the author commits a
+ * rewrite call.
+ */
+export async function analyze(url: string, opts: OptimizeOptions = {}): Promise<AnalyzeResult> {
+  const config = opts.config ?? TROSSEN_BLUEPRINT_CONFIG;
+  const page = await fetchRendered(url, opts);
+  const article = extractArticle(page);
+  const scored = scoreOriginal(article, config);
+  return { url, title: article.title, baselineScore: scored.baselineScore, fixList: buildFixList(scored) };
 }
 
 export async function optimize(
@@ -30,7 +53,7 @@ export async function optimize(
   const fixList = buildFixList(scored);
 
   const rewrittenDraft = (
-    await completeLong(provider, rewritePrompt(article, config, fixList), article.content)
+    await completeLong(provider, rewritePrompt(article, config, fixList, opts.answers), article.content)
   ).trim();
 
   const diff = await claimDiff(provider, article.text, rewrittenDraft);
