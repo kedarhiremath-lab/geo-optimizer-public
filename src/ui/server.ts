@@ -20,6 +20,28 @@ function loadEnv(): void {
 loadEnv();
 
 const app = express();
+
+// Unauthenticated health check (so the host's probe passes even with the
+// password gate enabled).
+app.get("/healthz", (_req, res) => res.type("text").send("ok"));
+
+// Optional password gate (HTTP Basic). Enabled only when APP_PASSWORD is set —
+// so local dev stays open, but a public cloud deploy is protected (and your
+// API quota isn't burned by strangers). Any username; password must match.
+const APP_PASSWORD = process.env.APP_PASSWORD;
+if (APP_PASSWORD) {
+  app.use((req, res, next) => {
+    const header = req.headers.authorization || "";
+    const [scheme, encoded] = header.split(" ");
+    if (scheme === "Basic" && encoded) {
+      const decoded = Buffer.from(encoded, "base64").toString();
+      const password = decoded.slice(decoded.indexOf(":") + 1);
+      if (password === APP_PASSWORD) return next();
+    }
+    res.set("WWW-Authenticate", 'Basic realm="geo-optimizer"').status(401).send("Authentication required.");
+  });
+}
+
 app.use(express.json({ limit: "1mb" }));
 
 const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">

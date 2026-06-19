@@ -1,0 +1,24 @@
+# Render Blueprint for the geo-optimizer app.
+# Place this file at the repo root. Render reads it when you create a "Blueprint"
+# and provisions the service automatically. Secrets (sync:false) are entered in
+# the Render dashboard, never committed.
+#
+# NOTE: this file is duplicated at the repo root (kedar_projects/render.yaml),
+# which is where Render looks for it. This copy lives in geo-optimizer/ for
+# reference and version history.
+services:
+  - type: web
+    name: geo-optimizer
+    runtime: docker
+    rootDir: geo-optimizer
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false          # paste in the Render dashboard (secret)
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: APP_PASSWORD
+        sync: false          # set a password; the site will require it
