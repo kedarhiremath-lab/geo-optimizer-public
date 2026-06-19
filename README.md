@@ -1,37 +1,49 @@
 # Trossen GEO/SEO Content Optimizer — Milestone 1
 
 Takes a trossenrobotics.com blog post and produces GEO (Generative Engine
-Optimization) + SEO optimization output: a prioritized fix-list, a rewritten
-draft, and `Article`/`TechArticle` JSON-LD. M1 is the optimizer core; the
-measurement harness (M2) and multi-post crawl/dashboard (M3) come later.
+Optimization) + SEO optimization output: a baseline score, a prioritized
+fix-list, a short "skills interview" that tunes the rewrite to your goals,
+and an optimized draft — with a before→after score. M1 is the optimizer core;
+the measurement harness (M2) and multi-post crawl/dashboard (M3) come later.
 
-## Pipeline
+## Quick start (new machine)
 
+1. **Install Node.js 20+** — https://nodejs.org (LTS). Verify: `node --version`.
+2. **Get a free Gemini API key** — https://aistudio.google.com/apikey (no billing
+   required). Free tier allows ~20 requests/day per model.
+3. In a terminal, from this folder:
+   ```bash
+   npm install
+   npx playwright install chromium      # one-time: downloads the headless browser
+   cp .env.example .env                  # then open .env and paste your key
+   npm run ui
+   ```
+   (On Windows PowerShell, use `copy .env.example .env` instead of `cp`.)
+4. Open **http://localhost:5173** in your browser.
+
+`.env` should contain:
 ```
-URL → render (Playwright/browse.exe, cached) → Readability extract (fail-loud)
-    → score ORIGINAL vs checklist → Gemini Flash rewrite (fact-constrained)
-    → claim-diff (invented fact = FAIL) → validate Article JSON-LD (dedup vs Wix)
-    → fix-list + draft + JSON-LD
+GEMINI_API_KEY=your-key-here
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
-## Setup
+## How to use the web app
+
+1. Paste a blog-post URL → **Analyze** (free, no AI): see the baseline GEO/SEO
+   score and the gaps.
+2. **Skills interview**: answer what you can (blanks are skipped). The five
+   sections come from gstack skill lenses — audience, thesis, structure,
+   engagement, and hard requirements — and steer the rewrite.
+3. **Generate optimized article** (one AI call): get the rewritten draft, the
+   before→after score, and any claims flagged to verify. Copy the Markdown into
+   your CMS.
+
+## Command-line use (optional)
 
 ```bash
-npm install
-npx playwright install chromium     # one-time, if not already present
-cp .env.example .env                 # then add your free-tier GEMINI_API_KEY
-```
-
-Get a free Gemini key at https://aistudio.google.com/apikey (no billing required).
-
-## Use
-
-```bash
-npm run inspect -- <url>     # fetch+extract+score+JSON-LD, NO LLM (no API quota used)
-npm run optimize -- <url>    # full pipeline incl. LLM rewrite (needs GEMINI_API_KEY)
-npm run ui                   # local web UI at http://localhost:5173
-npm test                     # unit tests (deterministic parts)
-npm run eval                 # independent quality eval on the Blueprint post
+npm run inspect -- <url>     # fetch+extract+score, NO AI call (no quota used)
+npm run optimize -- <url>    # full pipeline incl. AI rewrite (needs GEMINI_API_KEY)
+npm test                     # unit tests
 ```
 
 ## Notes / constraints (M1)
