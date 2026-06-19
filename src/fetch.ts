@@ -27,7 +27,14 @@ const execFileAsync = promisify(execFile);
  */
 async function renderWithPlaywright(url: string, timeoutMs: number): Promise<string> {
   const { chromium } = await import("playwright");
-  const browser = await chromium.launch();
+  // Flags required to run Chromium inside a container / as root (Render, Docker):
+  //   --no-sandbox            : Chromium refuses to run as root without this
+  //   --disable-dev-shm-usage : containers have a tiny /dev/shm; without this
+  //                             Chromium crashes on memory-heavy pages
+  //   --disable-gpu           : no GPU in the container
+  const browser = await chromium.launch({
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+  });
   try {
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs }).catch(async () => {
