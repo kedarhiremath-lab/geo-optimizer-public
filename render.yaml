@@ -10,7 +10,6 @@ services:
   - type: web
     name: geo-optimizer
     runtime: docker
-    rootDir: geo-optimizer
     dockerfilePath: ./Dockerfile
     plan: free
     healthCheckPath: /healthz
