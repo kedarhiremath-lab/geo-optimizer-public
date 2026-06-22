@@ -13,53 +13,17 @@ import { formatAnswers, type InterviewAnswers } from "./interview.js";
  * If the author answered the skills interview, their direction is woven in as
  * the highest-priority editorial guidance (subordinate only to fact-preservation).
  */
-export function rewritePrompt(
-  article: Article,
-  config: OptimizerConfig,
-  fixList: FixItem[],
-  answers?: InterviewAnswers,
-): string {
-  const fixes = fixList.map((f, i) => `${i + 1}. ${f.label}: ${f.recommendation}`).join("\n");
-  const direction = answers ? formatAnswers(answers) : "";
-  return structuredRewritePrompt(article, config, fixes, direction);
-}
+const HARD_CONSTRAINTS = [
+  "HARD CONSTRAINTS — violating any is a failure:",
+  "1. DO NOT invent or add any fact, statistic, number, date, quote, or citation",
+  "   not present in the source. Rephrase/restructure freely; never fabricate.",
+  "2. If the source lacks a stat the optimization wants, use a placeholder like",
+  "   [ADD STAT: source needed] — never invent one.",
+  "3. Preserve the company's claims and meaning.",
+];
 
-/**
- * Phase 1 structured rewrite. Returns JSON (the provider is called in JSON mode)
- * with the full optimization output: an actionable Short Version, a "Who this is
- * for" block, the optimized body (with comparison tables + answer blocks where
- * useful), an FAQ, SEO/GEO metadata, and asset recommendations.
- */
-function structuredRewritePrompt(article: Article, config: OptimizerConfig, fixes: string, direction: string): string {
+function targetsBlock(config: OptimizerConfig): string {
   return [
-    "You are a GEO/SEO optimization engine for a commercial robotics company. You",
-    "do not just lightly edit — you restructure content to be more scannable,",
-    "evidence-rich, and extractable by AI answer engines, while preserving meaning.",
-    "",
-    "HARD CONSTRAINTS — violating any is a failure:",
-    "1. DO NOT invent or add any fact, statistic, number, date, quote, or citation",
-    "   not present in the source. Rephrase/restructure freely; never fabricate.",
-    "2. If the source lacks a stat the optimization wants, use a placeholder like",
-    "   [ADD STAT: source needed] — never invent one.",
-    "3. Preserve the company's claims and meaning.",
-    "",
-    "Return ONLY a JSON object with EXACTLY these fields:",
-    "{",
-    '  "shortVersion": [string],   // 5-7 concrete, actionable steps a reader can act on. NOT a generic summary. Imperative voice.',
-    '  "whoThisIsFor": [string],   // 3-6 short audience descriptors (roles/teams this article serves)',
-    '  "articleMarkdown": string,  // the optimized BODY in Markdown: question-shaped ## headings matching the target queries, short paragraphs, and AT LEAST ONE comparison table (Markdown table) where the content supports it (e.g. a Demo vs. Minimum Viable Deployment vs. Production table). Use answer blocks. Do NOT include the short version, who-this-is-for, or FAQ here — those are separate fields.',
-    '  "faq": [{"q": string, "a": string}],  // 5-7 FAQ entries answering the real questions readers ask, grounded in the article',
-    '  "metadata": {',
-    '     "title": string,           // <title>, query-aligned, <= 60 chars',
-    '     "metaDescription": string, // 150-160 chars',
-    '     "slug": string,            // lowercase-hyphenated url slug',
-    '     "tags": [string],          // 4-8 topical tags',
-    '     "socialCopy": string,      // 1-2 sentence social/preview copy',
-    '     "imageAltText": [string]   // suggested alt text for key images (empty array if none)',
-    "  },",
-    '  "assetRecommendations": [string]  // recommendations to convert important visuals into machine-readable HTML tables, and downloadable lead-gen assets where appropriate',
-    "}",
-    "",
     "OPTIMIZATION TARGETS:",
     `- Primary query to answer first: "${config.primaryQueries[0]}".`,
     `- Use these target queries verbatim as ## headings where they fit: ${config.primaryQueries
@@ -67,13 +31,94 @@ function structuredRewritePrompt(article: Article, config: OptimizerConfig, fixe
       .join(", ")}.`,
     `- Name these entities explicitly near relevant claims: ${config.entities.join(", ")}.`,
     "- Surface concrete numbers already in the source as citable stats.",
+  ].join("\n");
+}
+
+function directionBlock(answers?: InterviewAnswers): string {
+  const direction = answers ? formatAnswers(answers) : "";
+  return direction
+    ? "AUTHOR'S EDITORIAL DIRECTION (highest priority after the hard constraints —\nhonor these about audience, thesis, structure, requirements):\n" + direction
+    : "";
+}
+
+/**
+ * Call 1 — the optimized article BODY as plain Markdown (no JSON). Generating
+ * free-text markdown outside of JSON avoids the escaping failures that broke a
+ * single combined JSON call. Restructures for scannability + extractability,
+ * with question-shaped headings and comparison tables where useful.
+ */
+export function articleBodyPrompt(
+  article: Article,
+  config: OptimizerConfig,
+  fixList: FixItem[],
+  answers?: InterviewAnswers,
+): string {
+  const fixes = fixList.map((f, i) => `${i + 1}. ${f.label}: ${f.recommendation}`).join("\n");
+  return [
+    "You are a GEO/SEO optimization engine for a commercial robotics company. You",
+    "restructure content to be scannable, evidence-rich, and extractable by AI",
+    "answer engines, while preserving meaning. This is a real rewrite, not a light edit.",
+    "",
+    ...HARD_CONSTRAINTS,
+    "",
+    "Write the optimized article BODY in Markdown:",
+    "- Question-shaped ## headings matching the target queries.",
+    "- Short, scannable paragraphs and answer blocks.",
+    "- AT LEAST ONE comparison table (Markdown table) where the content supports it",
+    "  (e.g. a 'Demo vs. Minimum Viable Deployment vs. Production' table).",
+    "- Do NOT include a title H1, a short-version list, a 'who this is for' block, or",
+    "  an FAQ — those are generated separately. Body only.",
+    "Output ONLY the Markdown body. No JSON, no commentary.",
+    "",
+    targetsBlock(config),
     "",
     "PRIORITIZED FIXES TO APPLY:",
     fixes || "(none — content already strong; focus on structure and extractability)",
     "",
-    direction
-      ? "AUTHOR'S EDITORIAL DIRECTION (highest priority after the hard constraints —\nhonor these about audience, thesis, structure, requirements):\n" + direction
-      : "",
+    directionBlock(answers),
+    "",
+    "---",
+    "SOURCE ARTICLE:",
+    article.content,
+  ].join("\n");
+}
+
+/**
+ * Call 2 — the small structured fields as JSON (Short Version, audience, FAQ,
+ * metadata, asset recs). Small JSON with short string values is reliable; the
+ * big free-text article is generated separately by articleBodyPrompt.
+ */
+export function structuredMetaPrompt(
+  article: Article,
+  config: OptimizerConfig,
+  answers?: InterviewAnswers,
+): string {
+  return [
+    "You are a GEO/SEO optimization engine for a commercial robotics company.",
+    "From the source article below, produce the supporting optimization assets.",
+    "",
+    ...HARD_CONSTRAINTS,
+    "",
+    "Return ONLY a JSON object with EXACTLY these fields (keep every string short;",
+    "no markdown, no newlines inside string values):",
+    "{",
+    '  "shortVersion": [string],   // 5-7 concrete, actionable steps. Imperative voice. NOT a generic summary.',
+    '  "whoThisIsFor": [string],   // 3-6 short audience descriptors (roles/teams)',
+    '  "faq": [{"q": string, "a": string}],  // 5-7 FAQ entries, answers grounded in the article (1-3 sentences each)',
+    '  "metadata": {',
+    '     "title": string,           // <title>, query-aligned, <= 60 chars',
+    '     "metaDescription": string, // 150-160 chars',
+    '     "slug": string,            // lowercase-hyphenated url slug',
+    '     "tags": [string],          // 4-8 topical tags',
+    '     "socialCopy": string,      // 1-2 sentence social/preview copy',
+    '     "imageAltText": [string]   // alt text for key images (empty array if none)',
+    "  },",
+    '  "assetRecommendations": [string]  // convert important visuals to machine-readable HTML tables; downloadable lead-gen assets where appropriate',
+    "}",
+    "",
+    targetsBlock(config),
+    "",
+    directionBlock(answers),
     "",
     "---",
     "SOURCE ARTICLE:",

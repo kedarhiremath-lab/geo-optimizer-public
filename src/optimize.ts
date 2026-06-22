@@ -5,10 +5,10 @@
 import { fetchRendered, type FetchOptions } from "./fetch.js";
 import { extractArticle } from "./extract.js";
 import { scoreOriginal, buildFixList, scoreDraft } from "./score.js";
-import { rewritePrompt } from "./prompts.js";
+import { articleBodyPrompt, structuredMetaPrompt } from "./prompts.js";
 import { claimDiff } from "./claimDiff.js";
 import { buildSchemas } from "./schema.js";
-import { parseOptimizedContent, composeArticle } from "./content.js";
+import { parseOptimizedMeta, assembleContent, composeArticle } from "./content.js";
 import { TROSSEN_BLUEPRINT_CONFIG } from "./config.js";
 import type { LlmProvider, OptimizeResult, OptimizerConfig } from "./types.js";
 import type { InterviewAnswers } from "./interview.js";
@@ -39,6 +39,13 @@ export async function analyze(url: string, opts: OptimizeOptions = {}): Promise<
   return { url, title: article.title, baselineScore: scored.baselineScore, fixList: buildFixList(scored) };
 }
 
+/** Strip a leading/trailing ```markdown or ``` fence if the model wrapped the body. */
+function stripCodeFences(s: string): string {
+  const t = s.trim();
+  const m = t.match(/^```(?:markdown|md)?\s*([\s\S]*?)```$/);
+  return (m ? m[1] : t).trim();
+}
+
 export async function optimize(
   url: string,
   provider: LlmProvider,
@@ -52,10 +59,13 @@ export async function optimize(
   const scored = scoreOriginal(article, config);
   const fixList = buildFixList(scored);
 
-  // Structured rewrite (single JSON call): produces short version, audience,
-  // optimized body with tables, FAQ, metadata, and asset recommendations.
-  const raw = await provider.complete(rewritePrompt(article, config, fixList, opts.answers), { json: true });
-  const content = parseOptimizedContent(raw);
+  // Two calls (reliability): the article BODY as plain Markdown, then the small
+  // structured fields as JSON. Embedding the big article in JSON intermittently
+  // broke parsing (unescaped quotes/newlines), so we keep them separate.
+  const bodyRaw = await provider.complete(articleBodyPrompt(article, config, fixList, opts.answers));
+  const articleBody = stripCodeFences(bodyRaw);
+  const metaRaw = await provider.complete(structuredMetaPrompt(article, config, opts.answers), { json: true });
+  const content = assembleContent(articleBody, parseOptimizedMeta(metaRaw));
 
   // The full publishable article (for scoring, fact-check, and copy).
   const fullArticle = composeArticle(content, article.title);

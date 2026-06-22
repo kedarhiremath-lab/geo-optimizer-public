@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { INTERVIEW_LENSES, formatAnswers, hasAnswers } from "../src/interview.js";
-import { rewritePrompt } from "../src/prompts.js";
+import { articleBodyPrompt, structuredMetaPrompt } from "../src/prompts.js";
 import { TROSSEN_BLUEPRINT_CONFIG } from "../src/config.js";
 import type { Article } from "../src/types.js";
 
@@ -38,13 +38,14 @@ describe("rewritePrompt weaves in answers", () => {
     url: "https://x", title: "t", text: "body", content: "body",
     headings: [], links: [], existingJsonLd: [], meta: {},
   };
-  it("includes the editorial direction block when answers given", () => {
-    const p = rewritePrompt(article, TROSSEN_BLUEPRINT_CONFIG, [], { oh_takeaway: "start narrow" });
-    expect(p).toContain("AUTHOR'S EDITORIAL DIRECTION");
-    expect(p).toContain("start narrow");
+  it("weaves the editorial direction into both prompts when answers given", () => {
+    const body = articleBodyPrompt(article, TROSSEN_BLUEPRINT_CONFIG, [], { oh_takeaway: "start narrow" });
+    const meta = structuredMetaPrompt(article, TROSSEN_BLUEPRINT_CONFIG, { oh_takeaway: "start narrow" });
+    expect(body).toContain("AUTHOR'S EDITORIAL DIRECTION");
+    expect(body).toContain("start narrow");
+    expect(meta).toContain("start narrow");
   });
   it("omits the direction block when no answers", () => {
-    const p = rewritePrompt(article, TROSSEN_BLUEPRINT_CONFIG, []);
-    expect(p).not.toContain("AUTHOR'S EDITORIAL DIRECTION");
+    expect(articleBodyPrompt(article, TROSSEN_BLUEPRINT_CONFIG, [])).not.toContain("AUTHOR'S EDITORIAL DIRECTION");
   });
 });

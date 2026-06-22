@@ -44,24 +44,29 @@ function asFaq(v: unknown): FaqItem[] {
 
 export class ContentParseError extends Error {}
 
-/** Parse the model's JSON output into a validated OptimizedContent. */
-export function parseOptimizedContent(raw: string): OptimizedContent {
+/** Everything in OptimizedContent except the article body (which is a separate call). */
+export type OptimizedMeta = Omit<OptimizedContent, "articleMarkdown">;
+
+/** Parse the small structured-meta JSON (call 2). The article body is parsed separately. */
+export function parseOptimizedMeta(raw: string): OptimizedMeta {
   let obj: Record<string, unknown>;
   try {
     obj = extractJson(raw) as Record<string, unknown>;
   } catch (e) {
-    throw new ContentParseError(`Could not parse optimizer JSON: ${e instanceof Error ? e.message : String(e)}`);
+    throw new ContentParseError(`Could not parse optimizer metadata JSON: ${e instanceof Error ? e.message : String(e)}`);
   }
-  const articleMarkdown = typeof obj.articleMarkdown === "string" ? obj.articleMarkdown.trim() : "";
-  if (!articleMarkdown) throw new ContentParseError("Optimizer returned no articleMarkdown.");
   return {
     shortVersion: asStringArray(obj.shortVersion),
     whoThisIsFor: asStringArray(obj.whoThisIsFor),
-    articleMarkdown,
     faq: asFaq(obj.faq),
     metadata: asMetadata(obj.metadata),
     assetRecommendations: asStringArray(obj.assetRecommendations),
   };
+}
+
+/** Combine the separately-generated article body with the structured meta. */
+export function assembleContent(articleMarkdown: string, meta: OptimizedMeta): OptimizedContent {
+  return { ...meta, articleMarkdown: articleMarkdown.trim() };
 }
 
 /**
