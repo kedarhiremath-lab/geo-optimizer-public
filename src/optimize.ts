@@ -5,10 +5,10 @@
 import { fetchRendered, type FetchOptions } from "./fetch.js";
 import { extractArticle } from "./extract.js";
 import { scoreOriginal, buildFixList, scoreDraft } from "./score.js";
-import { completeLong } from "./llm.js";
 import { rewritePrompt } from "./prompts.js";
 import { claimDiff } from "./claimDiff.js";
-import { buildJsonLd } from "./schema.js";
+import { buildSchemas } from "./schema.js";
+import { parseOptimizedContent, composeArticle } from "./content.js";
 import { TROSSEN_BLUEPRINT_CONFIG } from "./config.js";
 import type { LlmProvider, OptimizeResult, OptimizerConfig } from "./types.js";
 import type { InterviewAnswers } from "./interview.js";
@@ -52,24 +52,28 @@ export async function optimize(
   const scored = scoreOriginal(article, config);
   const fixList = buildFixList(scored);
 
-  const rewrittenDraft = (
-    await completeLong(provider, rewritePrompt(article, config, fixList, opts.answers), article.content)
-  ).trim();
+  // Structured rewrite (single JSON call): produces short version, audience,
+  // optimized body with tables, FAQ, metadata, and asset recommendations.
+  const raw = await provider.complete(rewritePrompt(article, config, fixList, opts.answers), { json: true });
+  const content = parseOptimizedContent(raw);
 
-  const diff = await claimDiff(provider, article.text, rewrittenDraft);
-  const { jsonLd, valid, notes } = buildJsonLd(article);
-  const optimizedScore = scoreDraft(rewrittenDraft, article, config);
+  // The full publishable article (for scoring, fact-check, and copy).
+  const fullArticle = composeArticle(content, article.title);
+
+  const diff = await claimDiff(provider, article.text, fullArticle);
+  const { schemas, notes, articleValid } = buildSchemas(article, content);
+  const optimizedScore = scoreDraft(fullArticle, article, config);
 
   return {
     url,
     baselineScore: scored.baselineScore,
     optimizedScore,
     fixList,
-    rewrittenDraft,
-    jsonLd,
-    jsonLdValid: valid,
-    jsonLdNotes: notes,
+    rewrittenDraft: fullArticle,
+    content,
+    schemas,
+    schemaNotes: notes,
     claimDiff: diff,
-    safe: diff.passed && valid,
+    safe: diff.passed && articleValid,
   };
 }

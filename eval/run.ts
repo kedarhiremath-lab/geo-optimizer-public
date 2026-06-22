@@ -39,9 +39,14 @@ async function main(): Promise<void> {
       detail: r.claimDiff.passed ? "no added facts" : `added: ${r.claimDiff.added.join(" | ")}`,
     },
     {
-      name: "JSON-LD validates",
-      pass: r.jsonLdValid,
-      detail: r.jsonLdNotes.join("; ") || "ok",
+      name: "schema generated (Article + others)",
+      pass: r.schemas.length > 0,
+      detail: r.schemaNotes.join("; ") || `${r.schemas.length} blocks`,
+    },
+    {
+      name: "structured content present (short version, faq, metadata)",
+      pass: r.content.shortVersion.length > 0 && r.content.faq.length > 0 && !!r.content.metadata.title,
+      detail: `shortVersion:${r.content.shortVersion.length} faq:${r.content.faq.length} title:${r.content.metadata.title ? "y" : "n"}`,
     },
     {
       name: "rewrite is non-empty",

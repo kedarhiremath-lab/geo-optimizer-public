@@ -28,11 +28,19 @@ export class GeminiProvider implements LlmProvider {
     this.model = new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: modelName });
   }
 
-  async complete(prompt: string): Promise<string> {
+  async complete(prompt: string, opts?: { json?: boolean }): Promise<string> {
     let lastErr: unknown;
+    const request = opts?.json
+      ? {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          // Large output budget: the structured rewrite returns a full article
+          // inside JSON; the default ~8k cap truncates it (→ invalid JSON).
+          generationConfig: { responseMimeType: "application/json", maxOutputTokens: 32768 },
+        }
+      : prompt;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const res = await this.model.generateContent(prompt);
+        const res = await this.model.generateContent(request as Parameters<typeof this.model.generateContent>[0]);
         return res.response.text();
       } catch (err) {
         lastErr = err;

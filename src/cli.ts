@@ -38,16 +38,27 @@ async function main(): Promise<void> {
     console.log(`\n!!! FACT-PRESERVATION FAIL — rewrite added unsupported claims:`);
     r.claimDiff.added.forEach((c) => console.log(`   - ${c}`));
   }
-  if (r.jsonLdNotes.length) {
-    console.log(`\n--- JSON-LD notes ---`);
-    r.jsonLdNotes.forEach((n) => console.log(`   - ${n}`));
+
+  console.log(`\n--- Short Version ---`);
+  r.content.shortVersion.forEach((s, i) => console.log(`${i + 1}. ${s}`));
+  console.log(`\n--- Who this is for ---`);
+  r.content.whoThisIsFor.forEach((s) => console.log(`   - ${s}`));
+  console.log(`\n--- Metadata ---`);
+  console.log(`title: ${r.content.metadata.title}`);
+  console.log(`description: ${r.content.metadata.metaDescription}`);
+  console.log(`slug: ${r.content.metadata.slug}`);
+  console.log(`tags: ${r.content.metadata.tags.join(", ")}`);
+  console.log(`\n--- FAQ (${r.content.faq.length}) ---`);
+  r.content.faq.forEach((f) => console.log(`Q: ${f.q}`));
+  if (r.schemaNotes.length) {
+    console.log(`\n--- Schema notes ---`);
+    r.schemaNotes.forEach((n) => console.log(`   - ${n}`));
   }
+  console.log(`\n--- JSON-LD (${r.schemas.length} blocks) ---`);
+  console.log(JSON.stringify(r.schemas, null, 2));
 
-  console.log(`\n--- JSON-LD (${r.jsonLdValid ? "valid" : "INVALID"}) ---`);
-  console.log(JSON.stringify(r.jsonLd, null, 2));
-
-  console.log(`\n--- Rewritten draft ---\n`);
-  console.log(r.rewrittenDraft);
+  console.log(`\n--- Optimized article ---\n`);
+  console.log(r.content.articleMarkdown);
 }
 
 main().catch((err) => {

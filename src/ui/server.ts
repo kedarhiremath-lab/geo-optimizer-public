@@ -103,6 +103,11 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
  .prose .tldr{background:rgba(79,140,255,.08);border-left:3px solid var(--accent);
    border-radius:6px;padding:.7rem .9rem;margin:.2rem 0 .4rem;color:#dfe6f5}
  .full{grid-column:1/-1}
+ .meta{display:flex;flex-direction:column;gap:.5rem}
+ .metarow{display:grid;grid-template-columns:150px 1fr;gap:.8rem;align-items:start}
+ .metak{color:var(--muted);font-size:.85rem}
+ .metav{color:#cdd2dc;word-break:break-word}
+ @media(max-width:680px){.metarow{grid-template-columns:1fr}}
  .lens{margin:.2rem 0 1rem}
  .lens .lenshead{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap}
  .lens .lensname{font-weight:700;color:var(--ink)}
@@ -234,16 +239,11 @@ function mdToHtml(md){
   flushP(); flushL();
   return html;
 }
-function draftCard(md){
-  let body=md, tldr="";
-  const firstH=md.search(/(^|\\n)#/);
-  if(firstH>0){ const pre=md.slice(0,firstH).trim(); if(pre){ tldr='<div class="tldr">'+esc(pre).replace(/\\n+/g," ")+'</div>'; body=md.slice(firstH); } }
-  return '<div class="card full"><div class="codehead"><h3>Optimized draft</h3>'+
-    '<button class="copy" data-c="draftraw">Copy Markdown</button></div>'+
-    '<div class="prose">'+tldr+mdToHtml(body)+'</div>'+
-    '<textarea id="draftraw" style="display:none">'+esc(md)+'</textarea></div>';
-}
+let RAW={};  // id -> raw text for copy buttons
+function copyBtn(id,label){ return '<button class="copy" data-c="'+id+'">'+(label||"Copy")+'</button>'; }
 function renderResult(d){
+  RAW={full:d.rewrittenDraft, schema:JSON.stringify(d.schemas,null,2)};
+  const c=d.content||{}, m=c.metadata||{};
   const safe=d.safe, delta=d.optimizedScore-d.baselineScore, ds=(delta>=0?"+":"")+delta;
   let h='<div class="grid">';
   h+='<div class="card ring"><h3>GEO/SEO score</h3><div class="beforeafter">'+
@@ -258,13 +258,46 @@ function renderResult(d){
        '<p class="hint" style="margin:.2rem 0 .6rem">In the rewrite but not clearly grounded in the source — confirm or remove each.</p>'+
        '<ul>'+d.claimDiff.added.map(c=>'<li>'+esc(c)+'</li>').join('')+'</ul></div>';
   }
-  h+=draftCard(d.rewrittenDraft);
+  // Short Version
+  if((c.shortVersion||[]).length){
+    h+='<div class="card full"><h3>The Short Version</h3><ol class="fixes">'+
+       c.shortVersion.map(s=>'<li>'+esc(s)+'</li>').join('')+'</ol></div>';
+  }
+  // Who this is for
+  if((c.whoThisIsFor||[]).length){
+    h+='<div class="card full"><h3>Who this is for</h3><div class="prose"><ul>'+
+       c.whoThisIsFor.map(s=>'<li>'+esc(s)+'</li>').join('')+'</ul></div></div>';
+  }
+  // Optimized article body
+  h+='<div class="card full"><div class="codehead"><h3>Optimized article</h3>'+copyBtn("full","Copy full article (Markdown)")+'</div>'+
+     '<div class="prose">'+mdToHtml(c.articleMarkdown||"")+'</div></div>';
+  // FAQ
+  if((c.faq||[]).length){
+    h+='<div class="card full"><h3>FAQ</h3><div class="prose">'+
+       c.faq.map(f=>'<p><strong>'+esc(f.q)+'</strong><br>'+esc(f.a)+'</p>').join('')+'</div></div>';
+  }
+  // Metadata
+  h+='<div class="card full"><h3>SEO/GEO metadata</h3><div class="meta">'+
+     metaRow("Title tag",m.title)+metaRow("Meta description",m.metaDescription)+metaRow("URL slug",m.slug)+
+     metaRow("Tags",(m.tags||[]).join(", "))+metaRow("Social copy",m.socialCopy)+
+     ((m.imageAltText||[]).length?metaRow("Image alt text",m.imageAltText.join(" | ")):"")+'</div></div>';
+  // Asset recommendations
+  if((c.assetRecommendations||[]).length){
+    h+='<div class="card full"><h3>Asset recommendations</h3><div class="prose"><ul>'+
+       c.assetRecommendations.map(s=>'<li>'+esc(s)+'</li>').join('')+'</ul></div></div>';
+  }
+  // Schema (JSON-LD)
+  h+='<div class="card full"><div class="codehead"><h3>Structured data — JSON-LD ('+(d.schemas||[]).length+' blocks)</h3>'+copyBtn("schema","Copy JSON-LD")+'</div>';
+  if((d.schemaNotes||[]).length){ h+='<ul class="hint" style="margin:.2rem 0 .5rem;padding-left:1.1rem">'+d.schemaNotes.map(n=>'<li>'+esc(n)+'</li>').join('')+'</ul>'; }
+  h+='<pre>'+esc(RAW.schema)+'</pre></div>';
   return h;
 }
+function metaRow(k,v){ return '<div class="metarow"><span class="metak">'+esc(k)+'</span><span class="metav">'+esc(v||"—")+'</span></div>'; }
 function bindCopies(){
   document.querySelectorAll(".copy").forEach(b=>b.onclick=async()=>{
-    const el=$("#"+b.dataset.c);
-    await navigator.clipboard.writeText(el.value!==undefined?el.value:el.textContent);
+    const key=b.dataset.c;
+    const text=(RAW&&RAW[key]!==undefined)?RAW[key]:(($("#"+key)&&$("#"+key).textContent)||"");
+    await navigator.clipboard.writeText(text);
     const o=b.textContent;b.textContent="Copied ✓";setTimeout(()=>b.textContent=o,1200);
   });
 }

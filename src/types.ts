@@ -64,18 +64,47 @@ export interface ClaimDiffResult {
   passed: boolean; // true when added.length === 0
 }
 
+/** A single FAQ entry (Q + A) — drives both the article section and FAQPage schema. */
+export interface FaqItem {
+  q: string;
+  a: string;
+}
+
+/** SEO/GEO metadata recommendations (#6). */
+export interface Metadata {
+  title: string; // <title> tag, query-aligned, <= ~60 chars
+  metaDescription: string; // ~150-160 chars
+  slug: string; // url slug
+  tags: string[];
+  socialCopy: string; // og/social preview copy
+  imageAltText: string[]; // suggested alt text for images that need it
+}
+
+/** The structured content the rewrite produces (Phase 1). */
+export interface OptimizedContent {
+  shortVersion: string[]; // #13 actionable steps
+  whoThisIsFor: string[]; // #10 audience bullets
+  articleMarkdown: string; // #11/#7 full optimized body (headings, tables, FAQ inline)
+  faq: FaqItem[]; // #7 structured FAQ
+  metadata: Metadata; // #6
+  assetRecommendations: string[]; // #5/#9 visual->HTML + downloadable asset recs
+}
+
 export interface OptimizeResult {
   url: string;
   baselineScore: number;
   /** Score of the rewritten draft on the same checklist (the "after"). */
   optimizedScore: number;
   fixList: FixItem[];
+  /** The optimized article body (markdown) — kept for back-compat + scoring. */
   rewrittenDraft: string;
-  jsonLd: Record<string, unknown>;
-  jsonLdValid: boolean;
-  jsonLdNotes: string[];
+  /** Full structured Phase-1 output. */
+  content: OptimizedContent;
+  /** Array of JSON-LD blocks: Article, Organization, Person, Breadcrumb, Image, FAQPage. */
+  schemas: Record<string, unknown>[];
+  schemaNotes: string[];
   claimDiff: ClaimDiffResult;
-  /** Overall pass/fail gate: claimDiff passed AND jsonLd valid. */
+  /** Overall pass/fail gate: claimDiff passed AND at least the Article schema valid. */
   safe: boolean;
 }
 
@@ -93,6 +122,6 @@ export interface OptimizerConfig {
 /** Abstraction so we can swap Gemini for Anthropic etc. later. */
 export interface LlmProvider {
   name: string;
-  /** Single completion call; returns raw text. */
-  complete(prompt: string): Promise<string>;
+  /** Single completion call. Pass { json: true } to request strict JSON output. */
+  complete(prompt: string, opts?: { json?: boolean }): Promise<string>;
 }
