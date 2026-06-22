@@ -54,6 +54,16 @@ export function articleBodyPrompt(
   answers?: InterviewAnswers,
 ): string {
   const fixes = fixList.map((f, i) => `${i + 1}. ${f.label}: ${f.recommendation}`).join("\n");
+  const internal = article.links.filter((l) => /trossenrobotics\.com/i.test(l)).slice(0, 4);
+  const external = article.links.filter((l) => !/trossenrobotics\.com/i.test(l)).slice(0, 6);
+  const linkBlock =
+    article.links.length > 0
+      ? [
+          "LINKS AVAILABLE FROM THE SOURCE (use real ones only — do NOT invent URLs):",
+          internal.length ? `- Internal (Trossen): ${internal.join(", ")}` : "- Internal: (none found — link to https://www.trossenrobotics.com where natural)",
+          external.length ? `- External: ${external.join(", ")}` : "- External: (none found)",
+        ].join("\n")
+      : "LINKS: none in source — link to https://www.trossenrobotics.com and cite any source named in the text.";
   return [
     "You are a GEO/SEO optimization engine for a commercial robotics company. You",
     "restructure content to be scannable, evidence-rich, and extractable by AI",
@@ -61,14 +71,22 @@ export function articleBodyPrompt(
     "",
     ...HARD_CONSTRAINTS,
     "",
-    "Write the optimized article BODY in Markdown:",
-    "- Question-shaped ## headings matching the target queries.",
-    "- Short, scannable paragraphs and answer blocks.",
-    "- AT LEAST ONE comparison table (Markdown table) where the content supports it",
-    "  (e.g. a 'Demo vs. Minimum Viable Deployment vs. Production' table).",
-    "- Do NOT include a title H1, a short-version list, a 'who this is for' block, or",
-    "  an FAQ — those are generated separately. Body only.",
-    "Output ONLY the Markdown body. No JSON, no commentary.",
+    "Write the optimized article BODY in Markdown. To score well it MUST hit ALL of these:",
+    "1. Open with a direct, answer-first paragraph (2-4 sentences) that answers the primary",
+    "   query in the first lines — before any background.",
+    "2. Use EACH primary target query verbatim as a question-shaped ## heading.",
+    "3. Name the entities (Trossen Robotics, Trossen SDK) explicitly near relevant claims,",
+    "   not 'we/our' — multiple times across the article.",
+    "4. Surface AT LEAST 3 concrete, citable numbers that are ALREADY in the source.",
+    "5. Include AT LEAST ONE internal Trossen link AND ONE external authoritative link, as",
+    "   inline Markdown links, using the real URLs listed below (never invent URLs).",
+    "6. Include at least one comparison table (Markdown table), e.g. 'Demo vs. Minimum Viable",
+    "   Deployment vs. Production'.",
+    "7. Short, scannable paragraphs and answer blocks.",
+    "Do NOT include a title H1, a short-version list, a 'who this is for' block, or an FAQ —",
+    "those are generated separately. Body only. Output ONLY the Markdown body, no commentary.",
+    "",
+    linkBlock,
     "",
     targetsBlock(config),
     "",

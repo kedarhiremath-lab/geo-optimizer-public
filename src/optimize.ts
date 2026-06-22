@@ -46,6 +46,30 @@ function stripCodeFences(s: string): string {
   return (m ? m[1] : t).trim();
 }
 
+/**
+ * Guarantee the body carries at least one internal Trossen link and one external
+ * reference (a full scoring dimension). The rewrite is told to include them, but
+ * if it doesn't, we append a References section using REAL links from the source
+ * (never invented) — legitimate internal linking + citation, which is exactly
+ * what the dimension rewards.
+ */
+function ensureLinks(markdown: string, sourceLinks: string[]): string {
+  const inMd = [...markdown.matchAll(/\]\((https?:[^)]+)\)/g)].map((m) => m[1]);
+  const bare = markdown.match(/https?:\/\/[^\s)]+/g) ?? [];
+  const present = [...inMd, ...bare];
+  const isTrossen = (l: string) => /trossenrobotics\.com/i.test(l);
+  const hasInternal = present.some(isTrossen);
+  const hasExternal = present.some((l) => !isTrossen(l));
+  if (hasInternal && hasExternal) return markdown;
+
+  const internal = sourceLinks.find(isTrossen) || "https://www.trossenrobotics.com";
+  const external = sourceLinks.find((l) => !isTrossen(l));
+  const refs: string[] = [];
+  if (!hasInternal) refs.push(`- [Trossen Robotics](${internal})`);
+  if (!hasExternal && external) refs.push(`- [Reference](${external})`);
+  return refs.length ? `${markdown}\n\n## References\n\n${refs.join("\n")}` : markdown;
+}
+
 export async function optimize(
   url: string,
   provider: LlmProvider,
@@ -63,7 +87,7 @@ export async function optimize(
   // structured fields as JSON. Embedding the big article in JSON intermittently
   // broke parsing (unescaped quotes/newlines), so we keep them separate.
   const bodyRaw = await provider.complete(articleBodyPrompt(article, config, fixList, opts.answers));
-  const articleBody = stripCodeFences(bodyRaw);
+  const articleBody = ensureLinks(stripCodeFences(bodyRaw), article.links);
   const metaRaw = await provider.complete(structuredMetaPrompt(article, config, opts.answers), { json: true });
   const content = assembleContent(articleBody, parseOptimizedMeta(metaRaw));
 
