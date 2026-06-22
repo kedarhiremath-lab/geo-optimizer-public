@@ -14,8 +14,10 @@ const BASE_BACKOFF_MS = 2_000;
 
 // Fallback chain. Each model has its OWN daily free-tier quota bucket, so when
 // the primary hits its daily cap we fall through to the next. This is the
-// "fallback behavior" the boss asked about (feedback #1).
-const DEFAULT_FALLBACKS = ["gemini-2.5-flash-lite", "gemini-2.0-flash-lite"];
+// "fallback behavior" the boss asked about (feedback #1). Primary is set via
+// GEMINI_MODEL (default: the strongest, gemini-2.5-pro); the chain degrades to
+// the current-generation Flash models so generation never hard-fails.
+const DEFAULT_FALLBACKS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"];
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -30,7 +32,7 @@ export class GeminiProvider implements LlmProvider {
   private genAI: GoogleGenerativeAI;
   private models: string[];
 
-  constructor(apiKey = process.env.GEMINI_API_KEY, modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash") {
+  constructor(apiKey = process.env.GEMINI_API_KEY, modelName = process.env.GEMINI_MODEL || "gemini-2.5-pro") {
     if (!apiKey) {
       throw new Error("GEMINI_API_KEY is not set. Copy .env.example to .env and add your free-tier key.");
     }

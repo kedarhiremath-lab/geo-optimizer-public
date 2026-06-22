@@ -129,8 +129,7 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
  <p>Score a post, answer a short skills interview, get an optimized draft tuned to your answers.</p>
 </header>
 <div class="bar">
- <input id="url" placeholder="https://www.trossenrobotics.com/post/…"
-   value="https://www.trossenrobotics.com/post/the-physical-ai-deployment-blueprint-from-pilot-to-commercial-reality"/>
+ <input id="url" placeholder="https://www.trossenrobotics.com/post/…"/>
  <button id="analyze">Analyze</button>
 </div>
 <div id="status" class="status"></div>
