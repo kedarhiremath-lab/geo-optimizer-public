@@ -34,9 +34,15 @@ GEMINI_MODEL=gemini-2.5-flash
 2. **Skills interview**: answer what you can (blanks are skipped). The five
    sections come from gstack skill lenses — audience, thesis, structure,
    engagement, and hard requirements — and steer the rewrite.
-3. **Generate optimized article** (one AI call): get the rewritten draft, the
-   before→after score, and any claims flagged to verify. Copy the Markdown into
-   your CMS.
+3. **Generate optimized article**: you get the before→after score plus a full
+   optimization package —
+   - a **Short Version** action list and a **Who this is for** block,
+   - the **optimized article** (restructured, with comparison tables + answer blocks),
+   - an **FAQ**, **SEO/GEO metadata** (title, meta description, slug, tags, social,
+     alt text), **JSON-LD schema** (Article, Organization, Person, BreadcrumbList,
+     ImageObject, FAQPage), and **asset recommendations**,
+   - any claims flagged to verify (the fact-preservation guardrail).
+   Copy any piece into your CMS.
 
 ## Command-line use (optional)
 
