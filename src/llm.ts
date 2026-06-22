@@ -45,9 +45,11 @@ export class GeminiProvider implements LlmProvider {
       } catch (err) {
         lastErr = err;
         const msg = err instanceof Error ? err.message : String(err);
-        const rateLimited = /429|rate|quota|resource.exhausted/i.test(msg);
-        if (!rateLimited || attempt === MAX_RETRIES) break;
-        // Exponential backoff for free-tier 10 RPM limits.
+        // Retry on rate limits AND transient server overloads (503/UNAVAILABLE/
+        // "high demand"), which are common on the free Flash endpoint.
+        const retryable = /429|rate|quota|resource.exhausted|503|unavailable|overloaded|high demand/i.test(msg);
+        if (!retryable || attempt === MAX_RETRIES) break;
+        // Exponential backoff.
         await sleep(BASE_BACKOFF_MS * 2 ** attempt);
       }
     }
