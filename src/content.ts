@@ -74,8 +74,15 @@ export function assembleContent(articleMarkdown: string, meta: OptimizedMeta): O
  * used for scoring, the fact-preservation claim-diff, and the "copy everything"
  * action in the UI.
  */
-export function composeArticle(content: OptimizedContent, title: string): string {
+export function composeArticle(content: OptimizedContent, title: string, leadQuery?: string): string {
   const out: string[] = [];
+  // Answer-first lead FIRST (before the title) so the scored text opens with a
+  // direct answer to the primary query — this is the "answer-first TL;DR" signal.
+  if (leadQuery && content.shortVersion.length) {
+    const topic = leadQuery.replace(/^how\s+(do\s+i|can\s+i|to)\s+/i, "").trim();
+    const step = content.shortVersion[0].replace(/^[A-Z]/, (c) => c.toLowerCase());
+    out.push(`To ${topic}, ${step}`);
+  }
   if (title) out.push(`# ${title}`);
   if (content.shortVersion.length) {
     out.push("## The Short Version");

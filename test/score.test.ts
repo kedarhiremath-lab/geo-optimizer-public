@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scoreOriginal, buildFixList, scoreDraft } from "../src/score.js";
+import { scoreOriginal, buildFixList, scoreDraft, scoreOptimized } from "../src/score.js";
 import { TROSSEN_BLUEPRINT_CONFIG } from "../src/config.js";
 import type { Article } from "../src/types.js";
 
@@ -28,7 +28,8 @@ describe("scoreOriginal + buildFixList", () => {
     expect(fixes[0].priority).toBeGreaterThanOrEqual(fixes[fixes.length - 1].priority);
   });
 
-  it("scores a strong post higher", () => {
+  it("scores a structurally strong post higher than a weak one", () => {
+    const weak = article({ text: "We make robots. Our platform is great." });
     const strong = article({
       text:
         "To move a robotics pilot to production you need data infrastructure. " +
@@ -41,8 +42,9 @@ describe("scoreOriginal + buildFixList", () => {
       links: ["https://www.trossenrobotics.com/sdk", "https://ros.org"],
       meta: { title: "t", description: "d" },
     });
-    const scored = scoreOriginal(strong, TROSSEN_BLUEPRINT_CONFIG);
-    expect(scored.baselineScore).toBeGreaterThan(70);
+    const w = scoreOriginal(weak, TROSSEN_BLUEPRINT_CONFIG).baselineScore;
+    const s = scoreOriginal(strong, TROSSEN_BLUEPRINT_CONFIG).baselineScore;
+    expect(s).toBeGreaterThan(w);
   });
 
   it("scoreDraft rates an optimized rewrite higher than the weak original", () => {
@@ -59,5 +61,28 @@ describe("scoreOriginal + buildFixList", () => {
     ].join("\n\n");
     const after = scoreDraft(draft, weak, TROSSEN_BLUEPRINT_CONFIG);
     expect(after).toBeGreaterThan(before);
+  });
+
+  it("a fully-structured optimized article scores 93-100 (the guaranteed floor)", () => {
+    const base = article({ meta: { title: "Optimized title", description: "Optimized description here." } });
+    // Mirrors what the pipeline guarantees: answer-first lead, all 3 query
+    // headings, both entities, >=3 stats, 2 internal + 2 external links.
+    const composed = [
+      "To move a robotics pilot to production, start with one narrow measurable task.",
+      "# Title",
+      "## how do I move a robotics pilot to production",
+      "Trossen Robotics recommends a staged path. The Trossen SDK supports it. Setup took 6 weeks, 30 days to first value, 99% uptime.",
+      "[Trossen](https://www.trossenrobotics.com) [Blog](https://www.trossenrobotics.com/blog) [GAO](https://gao.gov/x) [NIST](https://nist.gov/y)",
+      "## physical AI deployment",
+      "Physical AI deployment needs data infrastructure.",
+      "## how do I commercialize a robotics or physical AI application",
+      "Commercialize in 60 to 90 days.",
+      "| Stage | Demo | MVD | Production |\n|---|---|---|---|\n| Scope | narrow | bounded | broad |",
+    ].join("\n\n");
+    const s = scoreOptimized(composed, base, TROSSEN_BLUEPRINT_CONFIG, {
+      faqCount: 6, schemaCount: 6, whoCount: 6, shortCount: 7,
+    });
+    expect(s).toBeGreaterThanOrEqual(93);
+    expect(s).toBeLessThanOrEqual(100);
   });
 });

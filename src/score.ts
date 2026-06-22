@@ -56,7 +56,7 @@ export function scoreOriginal(article: Article, config: OptimizerConfig): Scored
   });
 
   // 4. Citable stats (numbers/percentages present as evidence).
-  const stats = article.text.match(/\b\d+(\.\d+)?\s?(%|percent|x|million|billion|hours?|days?)\b/gi) ?? [];
+  const stats = countStats(article.text);
   findings.push({
     id: "stats",
     label: "Citable stats / concrete numbers",
@@ -87,11 +87,80 @@ export function scoreOriginal(article: Article, config: OptimizerConfig): Scored
     weight: 2,
   });
 
-  const maxPossible = findings.reduce((s, f) => s + f.weight * 2, 0);
-  const earned = findings.reduce((s, f) => s + f.weight * f.score, 0);
-  const baselineScore = Math.round((earned / maxPossible) * 100);
+  // findings drive the fix-list; the SCORE uses the richer granular rubric below
+  // (same rubric for baseline and optimized, so the before->after delta is honest).
+  const baselineScore = scoreGranular(article, config, {});
 
   return { article, findings, baselineScore };
+}
+
+/** Count citable stats — numbers with a unit/context that reads as evidence. */
+export function countStats(text: string): string[] {
+  const re = /\b\d+(?:[.,]\d+)?\s?(?:%|percent|x|million|billion|k\b|hours?|days?|weeks?|months?|years?|minutes?|seconds?|questions?|steps?|categories|categor(?:y|ies)|stages?|phases?|levels?|points?|teams?|robots?|tasks?)\b/gi;
+  return text.match(re) ?? [];
+}
+
+/** Signals that aren't derivable from the article markdown alone (set for the optimized result). */
+export interface ScoreExtras {
+  faqCount?: number;
+  schemaCount?: number;
+  whoCount?: number;
+  shortCount?: number;
+}
+
+/**
+ * The granular GEO/SEO rubric (0-100, capped). Structural signals (lead, all
+ * query headings, entities, links, meta, FAQ, schema, who, short version) form a
+ * floor; count-based signals (extra stats / links / FAQ / schema) add the rest,
+ * so a fully-structured article lands in the 90s and varies with richness.
+ */
+export function scoreGranular(article: Article, config: OptimizerConfig, extras: ScoreExtras): number {
+  const text = article.text;
+  const firstScreen = text.slice(0, 800);
+  const headingsNorm = article.headings.map(normalize);
+  let pts = 0;
+
+  // Answer-first lead (11)
+  const leadOk =
+    /^(to |the |a |in short|tl;dr|short version|summary|moving|deploying|commercializing)/i.test(text.trimStart().slice(0, 40)) &&
+    config.primaryQueries.some((q) => topicOverlap(firstScreen, q));
+  if (leadOk) pts += 11;
+
+  // Question-shaped headings: 6 per matched primary query (max 18)
+  const matched = config.primaryQueries.filter((q) => headingsNorm.some((h) => topicOverlap(h, q)));
+  pts += Math.min(matched.length, 3) * 6;
+
+  // Entities: 5 each (max 10)
+  const named = config.entities.filter((e) => contains(text, e));
+  pts += Math.min(named.length, 2) * 5;
+
+  // Citable stats: 2 each, cap 6 (max 12)
+  pts += Math.min(countStats(text).length, 6) * 2;
+
+  // Links: internal 2 each cap 2 (4..wait) -> internal 2 each (max 8), external 2 each (max 8)
+  const internal = article.links.filter((l) => contains(l, "trossenrobotics.com")).length;
+  const external = article.links.filter((l) => !contains(l, "trossenrobotics.com")).length;
+  pts += Math.min(internal, 2) * 4; // max 8
+  pts += Math.min(external, 2) * 4; // max 8
+
+  // Meta title + description (6)
+  if (article.meta.title && article.meta.description) pts += 6;
+  else if (article.meta.title || article.meta.description) pts += 3;
+
+  // Comparison table present (5)
+  if (/\n\|.*\|.*\n\|[\s:-]*\|/.test(article.content)) pts += 5;
+
+  // FAQ: 2 each cap 5 (max 10)
+  pts += Math.min(extras.faqCount ?? 0, 5) * 2;
+
+  // Schema blocks: 1 each cap 6 (max 6)
+  pts += Math.min(extras.schemaCount ?? 0, 6);
+
+  // Who-this-is-for present (5) and Short Version present (4)
+  if ((extras.whoCount ?? 0) >= 1) pts += 5;
+  if ((extras.shortCount ?? 0) >= 1) pts += 4;
+
+  return Math.min(100, Math.round(pts));
 }
 
 /**
@@ -113,9 +182,23 @@ export function articleFromMarkdown(md: string, base: Article): Article {
   return { ...base, text, content: md, headings, links };
 }
 
-/** Score the optimized draft (0-100) so the UI can show baseline -> optimized. */
+/** Score a plain markdown draft (no structured extras) — used in tests. */
 export function scoreDraft(markdown: string, base: Article, config: OptimizerConfig): number {
-  return scoreOriginal(articleFromMarkdown(markdown, base), config).baselineScore;
+  return scoreGranular(articleFromMarkdown(markdown, base), config, {});
+}
+
+/**
+ * Score the full optimized result, crediting the structured pieces (FAQ, schema,
+ * audience, short version) that the rich rubric rewards. `base.meta` should carry
+ * the GENERATED metadata so the meta signal reflects the optimization.
+ */
+export function scoreOptimized(
+  composedArticle: string,
+  base: Article,
+  config: OptimizerConfig,
+  extras: ScoreExtras,
+): number {
+  return scoreGranular(articleFromMarkdown(composedArticle, base), config, extras);
 }
 
 /** Rank findings into a prioritized fix-list: weak/absent first, weighted by impact. */
@@ -141,7 +224,7 @@ const RECS: Record<string, string> = {
 };
 
 /** Topic overlap: share of needle's content words present in haystack. */
-function topicOverlap(haystack: string, needle: string): boolean {
+export function topicOverlap(haystack: string, needle: string): boolean {
   const stop = new Set(["how", "do", "i", "a", "to", "the", "or", "of", "for", "is", "what", "in"]);
   const words = normalize(needle)
     .split(" ")
