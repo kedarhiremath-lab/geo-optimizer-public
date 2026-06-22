@@ -310,11 +310,11 @@ function badUrl(url: string): boolean {
 }
 
 function quotaMessage(raw: string): string {
-  if (/429|quota|rate.?limit|resource.?exhausted/i.test(raw)) {
-    const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  if (/429|quota|rate.?limit|resource.?exhausted|all gemini models failed/i.test(raw)) {
     return (
-      `Daily free-tier quota reached for ${model} (Gemini free tier allows ~20 requests/day per model). ` +
-      `Wait for the daily reset (midnight Pacific), switch GEMINI_MODEL in .env to a model you haven't used today, or add billing.`
+      "All free-tier daily quotas are exhausted (the app already tried fallback models, " +
+      "each ~20 requests/day). Wait for the daily reset (midnight Pacific) or add billing to " +
+      "your Google project to remove the cap."
     );
   }
   return raw;

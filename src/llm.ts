@@ -12,49 +12,67 @@ import type { LlmProvider } from "./types.js";
 const MAX_RETRIES = 4;
 const BASE_BACKOFF_MS = 2_000;
 
+// Fallback chain. Each model has its OWN daily free-tier quota bucket, so when
+// the primary hits its daily cap we fall through to the next. This is the
+// "fallback behavior" the boss asked about (feedback #1).
+const DEFAULT_FALLBACKS = ["gemini-2.5-flash-lite", "gemini-2.0-flash-lite"];
+
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+const isRetryable = (msg: string) =>
+  /429|rate|quota|resource.exhausted|503|unavailable|overloaded|high demand/i.test(msg);
+const isQuota = (msg: string) => /quota|resource.exhausted|free_tier|per.?day/i.test(msg);
+
 export class GeminiProvider implements LlmProvider {
   readonly name: string;
-  private model;
+  private genAI: GoogleGenerativeAI;
+  private models: string[];
 
   constructor(apiKey = process.env.GEMINI_API_KEY, modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash") {
     if (!apiKey) {
       throw new Error("GEMINI_API_KEY is not set. Copy .env.example to .env and add your free-tier key.");
     }
-    this.name = modelName;
-    this.model = new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: modelName });
+    this.genAI = new GoogleGenerativeAI(apiKey);
+    // Primary model first, then fallbacks (deduped).
+    this.models = Array.from(new Set([modelName, ...DEFAULT_FALLBACKS]));
+    this.name = this.models.join(" -> ");
   }
 
   async complete(prompt: string, opts?: { json?: boolean }): Promise<string> {
-    let lastErr: unknown;
     const request = opts?.json
       ? {
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          // Large output budget: the structured rewrite returns a full article
-          // inside JSON; the default ~8k cap truncates it (→ invalid JSON).
+          // Large output budget so structured JSON isn't truncated.
           generationConfig: { responseMimeType: "application/json", maxOutputTokens: 32768 },
         }
       : prompt;
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const res = await this.model.generateContent(request as Parameters<typeof this.model.generateContent>[0]);
-        return res.response.text();
-      } catch (err) {
-        lastErr = err;
-        const msg = err instanceof Error ? err.message : String(err);
-        // Retry on rate limits AND transient server overloads (503/UNAVAILABLE/
-        // "high demand"), which are common on the free Flash endpoint.
-        const retryable = /429|rate|quota|resource.exhausted|503|unavailable|overloaded|high demand/i.test(msg);
-        if (!retryable || attempt === MAX_RETRIES) break;
-        // Exponential backoff.
-        await sleep(BASE_BACKOFF_MS * 2 ** attempt);
+
+    let lastErr: unknown;
+    for (let m = 0; m < this.models.length; m++) {
+      const model = this.genAI.getGenerativeModel({ model: this.models[m] });
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const res = await model.generateContent(request as Parameters<typeof model.generateContent>[0]);
+          return res.response.text();
+        } catch (err) {
+          lastErr = err;
+          const msg = err instanceof Error ? err.message : String(err);
+          // Daily-quota exhaustion: don't waste retries — jump to the next model.
+          if (isQuota(msg) && m < this.models.length - 1) break;
+          if (!isRetryable(msg) || attempt === MAX_RETRIES) break;
+          await sleep(BASE_BACKOFF_MS * 2 ** attempt);
+        }
       }
+      // This model's retry loop ended without returning. Fall through to the
+      // next model ONLY if it failed on quota and another model remains;
+      // otherwise stop and throw.
+      const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+      if (!(isQuota(msg) && m < this.models.length - 1)) break;
     }
     const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
-    throw new Error(`Gemini completion failed after ${MAX_RETRIES + 1} attempts: ${msg}`);
+    throw new Error(`All Gemini models failed (${this.models.join(", ")}). Last error: ${msg}`);
   }
 }
 
