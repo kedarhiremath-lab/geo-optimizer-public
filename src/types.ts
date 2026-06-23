@@ -93,7 +93,9 @@ export interface OptimizedContent {
 export interface OptimizeResult {
   url: string;
   baselineScore: number;
-  /** Score of the rewritten draft on the same checklist (the "after"). */
+  /** Score of the model's own rewrite, BEFORE deterministic guarantees (raw model quality). */
+  modelScore: number;
+  /** Final score after the engine guarantees the structural signals (the "after"). */
   optimizedScore: number;
   fixList: FixItem[];
   /** The optimized article body (markdown) — kept for back-compat + scoring. */

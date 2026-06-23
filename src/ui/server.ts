@@ -80,6 +80,13 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
  .beforeafter .after small{font-size:.9rem;color:var(--muted);font-weight:500}
  .delta{margin-top:.35rem;font-weight:700;font-size:.9rem}
  .delta.up{color:var(--good)} .delta.down{color:var(--bad)}
+ .stages{display:flex;flex-direction:column;align-items:center;gap:.15rem}
+ .stages .arrow{color:var(--muted);transform:rotate(90deg);font-size:1rem;line-height:1}
+ .stage{display:flex;flex-direction:column;align-items:center}
+ .stage .sv{font-size:1.5rem;font-weight:800;line-height:1.1}
+ .stage .sv.big{font-size:2.4rem}
+ .stage .sv small{font-size:.8rem;color:var(--muted);font-weight:500}
+ .stage .sl{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
  .badge{display:inline-flex;align-items:center;gap:.4rem;padding:.25rem .6rem;border-radius:999px;font-weight:600;font-size:.85rem}
  .badge.ok{background:rgba(46,194,138,.15);color:var(--good)}
  .badge.no{background:rgba(255,93,108,.15);color:var(--bad)}
@@ -244,11 +251,17 @@ function renderResult(d){
   RAW={full:d.rewrittenDraft, schema:JSON.stringify(d.schemas,null,2)};
   const c=d.content||{}, m=c.metadata||{};
   const safe=d.safe, delta=d.optimizedScore-d.baselineScore, ds=(delta>=0?"+":"")+delta;
+  const ms=(d.modelScore!==undefined)?d.modelScore:d.optimizedScore;
   let h='<div class="grid">';
-  h+='<div class="card ring"><h3>GEO/SEO score</h3><div class="beforeafter">'+
-     '<span class="b4">'+d.baselineScore+'</span><span class="arrow">→</span>'+
-     '<span class="after" style="color:'+scoreColor(d.optimizedScore)+'">'+d.optimizedScore+'<small>/100</small></span></div>'+
-     '<div class="delta '+(delta>=0?"up":"down")+'">'+ds+' points</div>'+
+  h+='<div class="card ring"><h3>GEO/SEO score</h3>'+
+     '<div class="stages">'+
+       '<div class="stage"><span class="sv" style="color:'+scoreColor(d.baselineScore)+'">'+d.baselineScore+'</span><span class="sl">original</span></div>'+
+       '<span class="arrow">→</span>'+
+       '<div class="stage"><span class="sv" style="color:'+scoreColor(ms)+'">'+ms+'</span><span class="sl">model rewrite</span></div>'+
+       '<span class="arrow">→</span>'+
+       '<div class="stage"><span class="sv big" style="color:'+scoreColor(d.optimizedScore)+'">'+d.optimizedScore+'<small>/100</small></span><span class="sl">fully optimized</span></div>'+
+     '</div>'+
+     '<div class="delta '+(delta>=0?"up":"down")+'">'+ds+' points overall</div>'+
      '<div class="badge '+(safe?"ok":"no")+'">'+(safe?"✓ safe to use":"⚠ needs review")+'</div></div>';
   h+='<div class="card"><h3>Fixes applied</h3><ol class="fixes">'+
      d.fixList.map(f=>'<li><b>'+esc(f.label)+'</b></li>').join('')+'</ol></div></div>';

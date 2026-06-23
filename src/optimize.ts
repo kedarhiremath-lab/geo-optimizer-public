@@ -154,9 +154,27 @@ export async function optimize(
   const bodyRaw = await provider.complete(articleBodyPrompt(article, config, fixList, opts.answers));
   const meta = parseOptimizedMeta(await provider.complete(structuredMetaPrompt(article, config, opts.answers), { json: true }));
   const draft = assembleContent(stripCodeFences(bodyRaw), meta);
+  // Metadata fallback: if the model returned empty title/description, derive
+  // them from the article so the meta signal isn't lost (grounded, not invented).
+  if (!draft.metadata.title) draft.metadata.title = article.title.slice(0, 60);
+  if (!draft.metadata.metaDescription) draft.metadata.metaDescription = article.text.replace(/\s+/g, " ").slice(0, 158);
+  const scoredBase = { ...article, meta: { title: draft.metadata.title, description: draft.metadata.metaDescription } };
+
+  // MODEL score: what the LLM produced on its own, BEFORE our deterministic
+  // guarantees (no injected lead/headings/links/table, and schema excluded since
+  // schema is engine-generated). This isolates raw model quality — it's the
+  // number that rises with a stronger model, and the honest middle of the
+  // before -> model -> fully-optimized story.
+  const modelComposed = composeArticle(draft, article.title);
+  const modelScore = scoreOptimized(modelComposed, scoredBase, config, {
+    faqCount: draft.faq.length,
+    schemaCount: 0,
+    whoCount: draft.whoThisIsFor.length,
+    shortCount: draft.shortVersion.length,
+  });
 
   // Deterministically guarantee the structural optimization signals (grounded,
-  // not fabricated) so the score reliably lands 93-100 regardless of the model.
+  // not fabricated) so the FINAL score reliably lands 96-100 regardless of model.
   draft.articleMarkdown = ensureLinks(guaranteeRubric(draft.articleMarkdown, draft, article, config), article.links);
   const content = draft;
 
@@ -166,9 +184,6 @@ export async function optimize(
 
   const diff = await claimDiff(provider, article.text, fullArticle);
   const { schemas, notes, articleValid } = buildSchemas(article, content);
-  // Score with the generated metadata (so the meta signal reflects the
-  // optimization) and credit for the structured pieces.
-  const scoredBase = { ...article, meta: { title: meta.metadata.title, description: meta.metadata.metaDescription } };
   const optimizedScore = scoreOptimized(fullArticle, scoredBase, config, {
     faqCount: content.faq.length,
     schemaCount: schemas.length,
@@ -179,6 +194,7 @@ export async function optimize(
   return {
     url,
     baselineScore: scored.baselineScore,
+    modelScore,
     optimizedScore,
     fixList,
     rewrittenDraft: fullArticle,
