@@ -37,13 +37,14 @@ function content(body: string): OptimizedContent {
 }
 
 describe("deterministic 93+ guarantee", () => {
-  it("rescues a WEAK model body (no links, no headings, no stats) to 93-100", () => {
-    const weakBody = "Physical AI is interesting. Companies should consider it. We think it is good.";
+  it("rescues a WEAK model body (no links, headings, stats, or table) to 93-100", () => {
+    // Worst case: the model returned almost nothing usable.
+    const weakBody = "Physical AI is interesting. Companies should consider it.";
     const c = content(weakBody);
     c.articleMarkdown = ensureLinks(guaranteeRubric(weakBody, c, article, TROSSEN_BLUEPRINT_CONFIG), article.links);
     const composed = composeArticle(c, article.title, TROSSEN_BLUEPRINT_CONFIG.primaryQueries[0]);
     const score = scoreOptimized(composed, { ...article, meta: { title: c.metadata.title, description: c.metadata.metaDescription } }, TROSSEN_BLUEPRINT_CONFIG, {
-      faqCount: c.faq.length, schemaCount: 6, whoCount: c.whoThisIsFor.length, shortCount: c.shortVersion.length,
+      faqCount: c.faq.length, schemaCount: 5, whoCount: c.whoThisIsFor.length, shortCount: c.shortVersion.length,
     });
     expect(score).toBeGreaterThanOrEqual(93);
     expect(score).toBeLessThanOrEqual(100);

@@ -23,9 +23,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-const isRetryable = (msg: string) =>
-  /429|rate|quota|resource.exhausted|503|unavailable|overloaded|high demand/i.test(msg);
+// Per-day quota exhaustion: retrying the same model won't help — move on.
 const isQuota = (msg: string) => /quota|resource.exhausted|free_tier|per.?day/i.test(msg);
+// Transient server-side issues worth a backoff retry on the SAME model.
+const isTransient = (msg: string) =>
+  !isQuota(msg) && /429|rate|503|unavailable|overloaded|high demand|timeout|temporar/i.test(msg);
 
 export class GeminiProvider implements LlmProvider {
   readonly name: string;
@@ -52,8 +54,13 @@ export class GeminiProvider implements LlmProvider {
       : prompt;
 
     let lastErr: unknown;
-    for (let m = 0; m < this.models.length; m++) {
-      const model = this.genAI.getGenerativeModel({ model: this.models[m] });
+    // Try each model in the chain. We fall through to the next model on ANY
+    // persistent failure of the current one (quota, model-unavailable/404,
+    // permission/403, etc.) — not just quota — so e.g. a key without Pro access
+    // degrades to Flash instead of hard-failing. Only transient errors trigger
+    // a same-model backoff retry. Throw only after the LAST model fails.
+    for (const modelName of this.models) {
+      const model = this.genAI.getGenerativeModel({ model: modelName });
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
           const res = await model.generateContent(request as Parameters<typeof model.generateContent>[0]);
@@ -61,17 +68,13 @@ export class GeminiProvider implements LlmProvider {
         } catch (err) {
           lastErr = err;
           const msg = err instanceof Error ? err.message : String(err);
-          // Daily-quota exhaustion: don't waste retries — jump to the next model.
-          if (isQuota(msg) && m < this.models.length - 1) break;
-          if (!isRetryable(msg) || attempt === MAX_RETRIES) break;
-          await sleep(BASE_BACKOFF_MS * 2 ** attempt);
+          if (isTransient(msg) && attempt < MAX_RETRIES) {
+            await sleep(BASE_BACKOFF_MS * 2 ** attempt);
+            continue;
+          }
+          break; // quota / permanent / out-of-retries -> move to the next model
         }
       }
-      // This model's retry loop ended without returning. Fall through to the
-      // next model ONLY if it failed on quota and another model remains;
-      // otherwise stop and throw.
-      const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
-      if (!(isQuota(msg) && m < this.models.length - 1)) break;
     }
     const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
     throw new Error(`All Gemini models failed (${this.models.join(", ")}). Last error: ${msg}`);

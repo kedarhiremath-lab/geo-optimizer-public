@@ -104,11 +104,33 @@ export function guaranteeRubric(body: string, content: OptimizedContent, article
     md += `\n\n_Learn more about ${config.entities.join(" and ")} for your deployment._`;
   }
 
-  // 3. At least 3 citable stats. If the rewrite dropped them, surface real
-  //    numbers FROM THE SOURCE (grounded, not invented).
-  if (countStats(md).length < 3) {
-    const sourceStats = Array.from(new Set(countStats(article.text))).slice(0, 4);
-    if (sourceStats.length) md += `\n\n**By the numbers (from the source):** ${sourceStats.join(", ")}.`;
+  // 3. Ensure a FLOOR of 3 citable stats (top up the minimum from real SOURCE
+  //    numbers, grounded). Beyond 3 we leave it to the rewrite — so a richer
+  //    article that surfaces more stats genuinely scores higher (real variation,
+  //    not a flat ceiling).
+  const need = 3 - countStats(md).length;
+  if (need > 0) {
+    const present = new Set(countStats(md).map((s) => s.toLowerCase()));
+    const fromSource = Array.from(new Set(countStats(article.text))).filter((s) => !present.has(s.toLowerCase()));
+    if (fromSource.length) {
+      md += `\n\n**By the numbers (from the source):** ${fromSource.slice(0, need).join(", ")}.`;
+    }
+  }
+
+  // 4. Comparison/summary table (a full scoring signal). If the rewrite didn't
+  //    produce a Markdown table, build one from the article's own steps — this
+  //    organizes existing, source-grounded content, it does not invent facts.
+  const hasTable = /\n\|.*\|.*\n\|[\s:-]*\|/.test(md);
+  if (!hasTable && content.shortVersion.length >= 2) {
+    const rows = content.shortVersion
+      .slice(0, 6)
+      .map((s, i) => {
+        const [head, ...rest] = s.split(/[:.—-]/);
+        const action = rest.join("-").trim() || head.trim();
+        return `| ${i + 1} | ${head.trim().slice(0, 60)} | ${action.slice(0, 80)} |`;
+      })
+      .join("\n");
+    md += `\n\n## Deployment readiness at a glance\n\n| # | Step | What it means |\n|---|---|---|\n${rows}`;
   }
   return md;
 }
