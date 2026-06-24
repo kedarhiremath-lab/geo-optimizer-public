@@ -32,9 +32,25 @@ describe("extractArticle", () => {
     expect(a.meta.description).toBe("From pilot to commercial reality.");
   });
 
-  it("fails loud when there are too few headings", () => {
-    const thin = `<!doctype html><html><head><title>t</title></head><body><article>
+  it("accepts a thin-but-real article even with only one heading (optimizer fixes structure)", () => {
+    const oneHeading = `<!doctype html><html><head><title>t</title></head><body><article>
       <h1>Only one heading</h1><p>${"word ".repeat(300)}</p></article></body></html>`;
-    expect(() => extractArticle(page(thin))).toThrow(ExtractionError);
+    const a = extractArticle(page(oneHeading));
+    expect(a.text.split(/\s+/).length).toBeGreaterThan(250);
+  });
+
+  it("fails loud only when no real article content can be recovered", () => {
+    const empty = `<!doctype html><html><head><title>t</title></head><body><nav>Home About</nav><p>tiny</p></body></html>`;
+    expect(() => extractArticle(page(empty))).toThrow(ExtractionError);
+  });
+
+  it("captures body copy rendered in divs/spans (Wix-style, no <p> tags)", () => {
+    const wix = `<!doctype html><html><head><title>Wix Post</title></head><body><main>
+      <h1>Wix Post</h1>
+      ${Array.from({ length: 16 }, (_, i) => `<div>This is a substantial paragraph of real article body copy number ${i} that Wix renders inside a div element rather than a paragraph tag, with enough words to count.</div>`).join("")}
+    </main></body></html>`;
+    const a = extractArticle(page(wix));
+    expect(a.text.split(/\s+/).length).toBeGreaterThan(250);
+    expect(a.text).toContain("substantial paragraph");
   });
 });

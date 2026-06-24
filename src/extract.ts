@@ -22,11 +22,6 @@ export function extractArticle(page: RenderedPage): Article {
   const dom = new JSDOM(page.html, { url: page.url });
   const doc = dom.window.document;
 
-  // Visible body word count (rough) before Readability strips chrome — used as
-  // the denominator for the fidelity check.
-  const bodyText = doc.body?.textContent ?? "";
-  const bodyWords = wordCount(bodyText);
-
   // Collect existing JSON-LD (Wix injects its own) so we can dedup later.
   const existingJsonLd: unknown[] = [];
   doc.querySelectorAll('script[type="application/ld+json"]').forEach((el) => {
@@ -45,64 +40,61 @@ export function extractArticle(page: RenderedPage): Article {
       undefined,
   };
 
-  // Readability mutates the doc; clone first so our heading/link scan sees the original.
-  const readabilityDoc = doc.cloneNode(true) as Document;
-  const parsed = new Readability(readabilityDoc).parse();
-  if (!parsed || !parsed.textContent) {
-    throw new ExtractionError(`Readability could not extract an article from ${page.url}`);
+  // Readability — used only for a clean title. It's a hint, not the content
+  // source (its body extraction is unreliable across Wix templates), so failure
+  // here is non-fatal.
+  let readabilityTitle: string | undefined;
+  let readabilityByline: string | undefined;
+  let readabilityPublished: string | undefined;
+  try {
+    const parsed = new Readability(doc.cloneNode(true) as Document).parse();
+    readabilityTitle = parsed?.title?.trim() || undefined;
+    readabilityByline = parsed?.byline?.trim() || undefined;
+    readabilityPublished = parsed?.publishedTime?.trim() || undefined;
+  } catch {
+    /* title/byline fall back below */
   }
 
-  const extractedWords = wordCount(parsed.textContent);
-  const ratio = bodyWords > 0 ? extractedWords / bodyWords : 1;
-
-  // Headings + links from the ORIGINAL (uncloned) doc, scoped to the article if found.
-  const articleRoot =
-    doc.querySelector("article") || doc.querySelector("main") || doc.body;
+  // Headings + links from the article container if present, else the body.
+  const articleRoot = doc.querySelector("article") || doc.querySelector("main") || doc.body;
   const headings = Array.from(articleRoot?.querySelectorAll("h1,h2,h3") ?? [])
     .map((h) => h.textContent?.trim() ?? "")
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((h) => !isChrome(h));
   const links = Array.from(articleRoot?.querySelectorAll("a[href]") ?? [])
     .map((a) => a.getAttribute("href") ?? "")
     .filter((h) => h.startsWith("http"));
 
-  if (extractedWords < EXTRACTION_THRESHOLDS.minExtractedWords) {
-    throw new ExtractionError(
-      `Extracted article too short for ${page.url}: ${extractedWords} words ` +
-        `(need >= ${EXTRACTION_THRESHOLDS.minExtractedWords}). Extraction likely failed.`,
-    );
-  }
-  if (ratio < EXTRACTION_THRESHOLDS.catastrophicRatio) {
-    throw new ExtractionError(
-      `Extraction recovered almost nothing for ${page.url}: ${extractedWords}/${bodyWords} words ` +
-        `(${(ratio * 100).toFixed(1)}%, below catastrophic floor ${EXTRACTION_THRESHOLDS.catastrophicRatio * 100}%).`,
-    );
-  }
-  if (headings.length < EXTRACTION_THRESHOLDS.minHeadings) {
-    throw new ExtractionError(
-      `Only ${headings.length} headings found in ${page.url} ` +
-        `(need >= ${EXTRACTION_THRESHOLDS.minHeadings}). Structure likely lost.`,
-    );
-  }
-
-  // Build a markdown-ish content string with headings marked, for the LLM.
-  // Chrome (audio widget, read-time, byline date, share/subscribe) is stripped
-  // so it pollutes neither the rewrite nor the fact-preservation guardrail.
+  // Build the article content from the rendered DOM (chrome-stripped). This is
+  // the actual content the rest of the pipeline uses — so the fidelity guards
+  // below check THIS, not Readability's (often-wrong) extraction.
   const content = buildMarkdownish(articleRoot);
-  // Derive the plain text from the cleaned content so text + content agree and
-  // both are chrome-free (parsed.textContent still carries the chrome).
   const text = content.replace(/^#{1,3}\s+/gm, "").replace(/^- /gm, "").trim();
+  const contentWords = wordCount(text);
+
+  // Fail loud only if we genuinely couldn't recover a real article.
+  if (contentWords < EXTRACTION_THRESHOLDS.minExtractedWords) {
+    throw new ExtractionError(
+      `Could not extract a usable article from ${page.url}: only ${contentWords} content words ` +
+        `(need >= ${EXTRACTION_THRESHOLDS.minExtractedWords}). The page may not be a standard article.`,
+    );
+  }
+  // NOTE: we do NOT fail on too-few headings. A post with weak heading structure
+  // is a valid input — fixing that structure is precisely what the optimizer
+  // does (it scores low on the heading signal and the rewrite adds proper
+  // question-shaped headings). Refusing such a page would be backwards.
 
   return {
     url: page.url,
-    title: parsed.title?.trim() || meta.title || "Untitled",
+    title: readabilityTitle || meta.title || headings[0] || "Untitled",
     text,
     content,
-    headings: headings.filter((h) => !isChrome(h)),
+    headings,
     links: Array.from(new Set(links)),
     existingJsonLd,
     meta,
-    byline: parsed.byline?.trim() || undefined,
-    publishedTime: parsed.publishedTime?.trim() || undefined,
+    byline: readabilityByline,
+    publishedTime: readabilityPublished,
   };
 }
 
@@ -122,14 +114,29 @@ function isChrome(line: string): boolean {
   return CHROME_PATTERNS.some((re) => re.test(t));
 }
 
-/** Flatten an element into headings (## ) + paragraphs so the LLM sees structure. */
+/**
+ * Flatten an element into headings + paragraphs for the LLM. Captures real
+ * paragraph tags (p/li/blockquote) AND leaf div/span/td text — Wix and many
+ * site builders render body copy in <div>/<span>, not <p>, so a p-only scan
+ * misses most of the article. We take only LEAF containers (no block-level
+ * children) to avoid double-counting parents, dedupe identical strings, and
+ * require div/span/td blocks to be reasonably long so we skip nav/buttons.
+ */
+const CONTAINER = "h1,h2,h3,p,li,blockquote,div,span,td";
 function buildMarkdownish(root: Element | null): string {
   if (!root) return "";
   const out: string[] = [];
-  root.querySelectorAll("h1,h2,h3,p,li").forEach((el) => {
-    const t = el.textContent?.trim();
-    if (!t || isChrome(t)) return;
+  const seen = new Set<string>();
+  root.querySelectorAll(CONTAINER).forEach((el) => {
     const tag = el.tagName.toLowerCase();
+    const isLoose = tag === "div" || tag === "span" || tag === "td";
+    // Skip generic containers that wrap other content (count the leaves instead).
+    if (isLoose && el.querySelector(CONTAINER)) return;
+    const t = el.textContent?.replace(/\s+/g, " ").trim();
+    if (!t || isChrome(t)) return;
+    if (isLoose && t.length < 40) return; // short loose blocks are usually nav/UI, not copy
+    if (seen.has(t)) return;
+    seen.add(t);
     if (tag === "h1") out.push(`# ${t}`);
     else if (tag === "h2") out.push(`## ${t}`);
     else if (tag === "h3") out.push(`### ${t}`);
