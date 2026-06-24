@@ -25,10 +25,8 @@ const HARD_CONSTRAINTS = [
 function targetsBlock(config: OptimizerConfig): string {
   return [
     "OPTIMIZATION TARGETS:",
-    `- Primary query to answer first: "${config.primaryQueries[0]}".`,
-    `- Use these target queries verbatim as ## headings where they fit: ${config.primaryQueries
-      .map((q: string) => `"${q}"`)
-      .join(", ")}.`,
+    `- Primary query to answer at the top (opening paragraph only): "${config.primaryQueries[0]}".`,
+    `- These are the topics the article should cover — do NOT rename existing headings to these; the engine adds headings for any that are missing: ${config.primaryQueries.map((q: string) => `"${q}"`).join(", ")}.`,
     `- Name these entities explicitly near relevant claims: ${config.entities.join(", ")}.`,
     "- Surface concrete numbers already in the source as citable stats.",
   ].join("\n");
@@ -86,8 +84,8 @@ export function articleBodyPrompt(
     "WHAT YOU MAY DO (the complete list — nothing else):",
     "1. ADD a short answer-first paragraph at the very top — assembled from",
     "   the author's own opening lines, in their voice.",
-    "2. RENAME a heading to match a target query IF the section body already",
-    "   covers that topic (keep ALL content beneath it unchanged).",
+    "2. KEEP every heading EXACTLY as the author wrote it. Do NOT rename, rephrase,",
+    "   or replace any existing heading. The scoring engine handles heading gaps separately.",
     "3. Replace a vague 'we' / 'our' with 'Trossen Robotics' or 'Trossen SDK'",
     "   where it's an explicit reference — no new claims.",
     "4. ADD one inline link (from the list below) where one is naturally missing",

@@ -94,7 +94,9 @@ export function guaranteeRubric(body: string, content: OptimizedContent, article
     if (headings.some((h) => topicOverlap(h, q))) continue;
     const faq = content.faq.find((f) => topicOverlap(f.q, q));
     const ans = faq?.a || content.shortVersion.slice(0, 3).map((s) => `- ${s}`).join("\n") || "See the guidance above.";
-    const heading = q.charAt(0).toUpperCase() + q.slice(1) + "?";
+    // Title-case the injected heading so it reads naturally
+    const minor = new Set(["a","an","the","and","but","or","for","nor","on","at","to","by","in","of","up","as","if"]);
+    const heading = q.split(/\s+/).map((w,i) => i === 0 || !minor.has(w.toLowerCase()) ? w.charAt(0).toUpperCase() + w.slice(1) : w.toLowerCase()).join(" ") + "?";
     md += `\n\n## ${heading}\n\n${ans}`;
   }
 
