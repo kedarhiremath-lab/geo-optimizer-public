@@ -364,11 +364,18 @@ app.post("/api/analyze", async (req, res) => {
     res.status(400).json({ error: "Provide a valid http(s) URL." });
     return;
   }
+  // Hard timeout: if the browser hangs, return a proper error rather than
+  // dropping the connection (which gives the client "Unexpected end of JSON input").
+  const timeout = setTimeout(() => {
+    if (!res.headersSent) res.status(504).json({ error: "Page render timed out (>90s). Try again or check the URL." });
+  }, 90_000);
   try {
     const a = await analyze(url);
-    res.json({ ...a, lenses: INTERVIEW_LENSES });
+    clearTimeout(timeout);
+    if (!res.headersSent) res.json({ ...a, lenses: INTERVIEW_LENSES });
   } catch (err) {
-    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    clearTimeout(timeout);
+    if (!res.headersSent) res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -379,22 +386,37 @@ app.post("/api/optimize", async (req, res) => {
     res.status(400).json({ error: "Provide a valid http(s) URL." });
     return;
   }
+  const timeout = setTimeout(() => {
+    if (!res.headersSent) res.status(504).json({ error: "Optimization timed out (>3min). Try again." });
+  }, 180_000);
   try {
     const result = await optimize(url, new GeminiProvider(), { answers });
+    clearTimeout(timeout);
     saveResult(url, result); // cache the latest good result for the demo safety net
-    res.json(result);
+    if (!res.headersSent) res.json(result);
   } catch (err) {
+    clearTimeout(timeout);
     const raw = err instanceof Error ? err.message : String(err);
     // Demo safety net: on quota/transient failure, serve the last good result.
     if (/429|quota|rate.?limit|resource.?exhausted|all gemini models failed/i.test(raw)) {
       const cached = loadResult(url) as Record<string, unknown> | null;
       if (cached) {
-        res.json({ ...cached, servedFromCache: true });
+        if (!res.headersSent) res.json({ ...cached, servedFromCache: true });
         return;
       }
     }
-    res.status(500).json({ error: quotaMessage(raw) });
+    if (!res.headersSent) res.status(500).json({ error: quotaMessage(raw) });
   }
+});
+
+// Prevent unhandled promise rejections / uncaught exceptions from silently
+// killing the process mid-request (which gives the client an empty body /
+// "Unexpected end of JSON input" instead of a real error message).
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason);
 });
 
 const PORT = Number(process.env.PORT) || 5173;
