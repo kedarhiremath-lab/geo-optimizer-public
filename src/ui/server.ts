@@ -3,11 +3,35 @@
 // Internal tool, runs locally (no auth, no hosting — out of scope for M1).
 
 import express from "express";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { analyze, optimize } from "../optimize.js";
 import { GeminiProvider } from "../llm.js";
 import { INTERVIEW_LENSES } from "../interview.js";
+
+// Demo safety net: cache the last successful optimization per URL. If the live
+// quota is exhausted, we serve the cached result instead of a red error.
+const RESULT_CACHE = join(process.cwd(), "cache", "results");
+function resultPath(url: string): string {
+  return join(RESULT_CACHE, createHash("sha256").update(url).digest("hex").slice(0, 16) + ".json");
+}
+function saveResult(url: string, result: unknown): void {
+  try {
+    mkdirSync(RESULT_CACHE, { recursive: true });
+    writeFileSync(resultPath(url), JSON.stringify(result), "utf8");
+  } catch {
+    /* cache write is best-effort */
+  }
+}
+function loadResult(url: string): unknown | null {
+  try {
+    const p = resultPath(url);
+    return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : null;
+  } catch {
+    return null;
+  }
+}
 
 function loadEnv(): void {
   const p = join(process.cwd(), ".env");
@@ -252,7 +276,9 @@ function renderResult(d){
   const c=d.content||{}, m=c.metadata||{};
   const safe=d.safe, delta=d.optimizedScore-d.baselineScore, ds=(delta>=0?"+":"")+delta;
   const ms=(d.modelScore!==undefined)?d.modelScore:d.optimizedScore;
-  let h='<div class="grid">';
+  let h='';
+  if(d.servedFromCache){ h+='<div class="hint" style="margin:.2rem 0 .6rem;color:var(--warn)">Showing the last saved result for this URL (live AI quota is exhausted right now).</div>'; }
+  h+='<div class="grid">';
   h+='<div class="card ring"><h3>GEO/SEO score</h3>'+
      '<div class="stages">'+
        '<div class="stage"><span class="sv" style="color:'+scoreColor(d.baselineScore)+'">'+d.baselineScore+'</span><span class="sl">original</span></div>'+
@@ -355,9 +381,19 @@ app.post("/api/optimize", async (req, res) => {
   }
   try {
     const result = await optimize(url, new GeminiProvider(), { answers });
+    saveResult(url, result); // cache the latest good result for the demo safety net
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: quotaMessage(err instanceof Error ? err.message : String(err)) });
+    const raw = err instanceof Error ? err.message : String(err);
+    // Demo safety net: on quota/transient failure, serve the last good result.
+    if (/429|quota|rate.?limit|resource.?exhausted|all gemini models failed/i.test(raw)) {
+      const cached = loadResult(url) as Record<string, unknown> | null;
+      if (cached) {
+        res.json({ ...cached, servedFromCache: true });
+        return;
+      }
+    }
+    res.status(500).json({ error: quotaMessage(raw) });
   }
 });
 
