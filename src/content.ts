@@ -76,12 +76,20 @@ export function assembleContent(articleMarkdown: string, meta: OptimizedMeta): O
  */
 export function composeArticle(content: OptimizedContent, title: string, leadQuery?: string): string {
   const out: string[] = [];
-  // Answer-first lead FIRST (before the title) so the scored text opens with a
-  // direct answer to the primary query — this is the "answer-first TL;DR" signal.
+  // Answer-first lead. PREFER the author's own opening: if the body already opens
+  // on-topic (covers most of the primary query's words in its first lines), use
+  // it as-is to preserve voice. Only fall back to a synthesized lead if the
+  // author's opening doesn't address the query.
   if (leadQuery && content.shortVersion.length) {
     const topic = leadQuery.replace(/^how\s+(do\s+i|can\s+i|to)\s+/i, "").trim();
-    const step = content.shortVersion[0].replace(/^[A-Z]/, (c) => c.toLowerCase());
-    out.push(`To ${topic}, ${step}`);
+    const stop = new Set(["how", "do", "i", "a", "to", "the", "or", "of", "for", "is", "what", "in", "an"]);
+    const qWords = topic.toLowerCase().split(/\s+/).filter((w) => w.length > 2 && !stop.has(w));
+    const opening = content.articleMarkdown.replace(/^#{1,3}\s+.*$/gm, "").replace(/\s+/g, " ").trim().slice(0, 400).toLowerCase();
+    const covered = qWords.length ? qWords.filter((w) => opening.includes(w)).length / qWords.length : 0;
+    if (covered < 0.6) {
+      const step = content.shortVersion[0].replace(/^[A-Z]/, (c) => c.toLowerCase());
+      out.push(`To ${topic}, ${step}`);
+    }
   }
   if (title) out.push(`# ${title}`);
   if (content.shortVersion.length) {
