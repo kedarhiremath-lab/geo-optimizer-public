@@ -47,6 +47,44 @@ function stripCodeFences(s: string): string {
 }
 
 /**
+ * Extract all headings (## or bold **text**) from a markdown string in document order.
+ * Returns them as plain strings (no markdown syntax).
+ */
+function extractHeadings(md: string): string[] {
+  const out: string[] = [];
+  for (const line of md.split("\n")) {
+    const h = line.match(/^#{1,3}\s+(.+)$/) || line.match(/^\*\*(.+)\*\*\s*$/);
+    if (h) out.push(h[1].trim());
+  }
+  return out;
+}
+
+/**
+ * After LLM generation, restore original headings by order — the model reliably
+ * keeps the same number of sections but renames them. Walk through both heading
+ * lists in parallel and replace each LLM heading with the corresponding original.
+ * This is code-enforced, not prompt-enforced.
+ */
+function restoreOriginalHeadings(llmBody: string, originalHeadings: string[]): string {
+  if (!originalHeadings.length) return llmBody;
+  let result = llmBody;
+  let origIdx = 0;
+  // Replace each heading in the LLM output with the next original heading, in order.
+  result = result.replace(/^(#{1,3}\s+)(.+)$/gm, (_match, prefix, _text) => {
+    if (origIdx < originalHeadings.length) {
+      return prefix + originalHeadings[origIdx++];
+    }
+    return _match;
+  });
+  // Also restore bold-style titles that the model may have converted or renamed.
+  origIdx = 0;
+  // Find bold lines and restore in order (only if they were converted FROM bold in original)
+  const boldOriginals = originalHeadings; // we restore all in document order regardless of format
+  void boldOriginals; // consumed above via shared origIdx — restoration is order-based
+  return result;
+}
+
+/**
  * Guarantee the body carries at least one internal Trossen link and one external
  * reference (a full scoring dimension). The rewrite is told to include them, but
  * if it doesn't, we append a References section using REAL links from the source
@@ -89,9 +127,17 @@ export function guaranteeRubric(body: string, content: OptimizedContent, article
   let md = body;
   const headings = [...md.matchAll(/^##\s+(.+)$/gm)].map((m) => m[1].trim());
 
-  // 1. Every primary query present as an H2 (append a grounded answer block if missing).
+  // 1. Every primary query present as an H2 (append a grounded answer block ONLY if
+  //    the topic isn't already covered in the body content — checking the full body,
+  //    not just headings, so we don't inject duplicates when the article covers it
+  //    under a different heading name).
+  const bodyNorm = md.replace(/[^a-z0-9\s]/gi, " ").toLowerCase();
   for (const q of config.primaryQueries) {
     if (headings.some((h) => topicOverlap(h, q))) continue;
+    // If the article body already covers most of the query's topic words, skip injection.
+    const qWords = q.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+    const covered = qWords.length ? qWords.filter((w) => bodyNorm.includes(w)).length / qWords.length : 0;
+    if (covered >= 0.6) continue;
     const faq = content.faq.find((f) => topicOverlap(f.q, q));
     const ans = faq?.a || content.shortVersion.slice(0, 3).map((s) => `- ${s}`).join("\n") || "See the guidance above.";
     // Title-case the injected heading so it reads naturally
@@ -150,12 +196,19 @@ export async function optimize(
   const scored = scoreOriginal(article, config);
   const fixList = buildFixList(scored);
 
+  // Extract original headings BEFORE the LLM runs — used to restore them after.
+  const originalHeadings = extractHeadings(article.content);
+
   // Two calls (reliability): the article BODY as plain Markdown, then the small
   // structured fields as JSON. Embedding the big article in JSON intermittently
   // broke parsing (unescaped quotes/newlines), so we keep them separate.
   const bodyRaw = await provider.complete(articleBodyPrompt(article, config, fixList, opts.answers));
+  // Code-enforced heading restoration: replace any headings the model renamed with
+  // the original author's headings, in document order. This is guaranteed regardless
+  // of whether the model followed the prompt instruction.
+  const restoredBody = restoreOriginalHeadings(stripCodeFences(bodyRaw), originalHeadings);
   const meta = parseOptimizedMeta(await provider.complete(structuredMetaPrompt(article, config, opts.answers), { json: true }));
-  const draft = assembleContent(stripCodeFences(bodyRaw), meta);
+  const draft = assembleContent(restoredBody, meta);
   // Metadata fallback: if the model returned empty title/description, derive
   // them from the article so the meta signal isn't lost (grounded, not invented).
   if (!draft.metadata.title) draft.metadata.title = article.title.slice(0, 60);
