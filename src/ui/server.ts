@@ -187,6 +187,7 @@ async function doAnalyze(){
     const r=await fetch("/api/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url})});
     const d=await r.json(); if(!r.ok)throw new Error(d.error||"failed");
     CTX.lenses=d.lenses;
+    CTX.provider=d.provider||"the configured model";
     $("#status").innerHTML="";
     $("#baseline").innerHTML=renderBaseline(d);
     $("#interview").innerHTML=renderInterview(d.lenses);
@@ -235,7 +236,7 @@ async function doOptimize(){
   const answers=collectAnswers();
   $("#gen").disabled=true;
   $("#status").className="status";
-  $("#status").innerHTML='<span class="spinner"></span>Rewriting with your answers (free-tier AI, ~20–60s)…';
+  $("#status").innerHTML='<span class="spinner"></span>Rewriting in the author\'s voice with '+esc(CTX.provider||"the configured model")+' (~30–90s)…';
   $("#out").innerHTML="";
   try{
     const r=await fetch("/api/optimize",{method:"POST",headers:{"content-type":"application/json"},
@@ -349,6 +350,24 @@ function badUrl(url: string): boolean {
   return !/^https?:\/\//.test(url);
 }
 
+// Friendly name of the model the rewrite will actually use (so the UI never
+// claims "free-tier AI" when it's really running on paid Claude Opus, or vice
+// versa). Mirrors createProvider()'s selection logic without constructing a client.
+function providerLabel(): string {
+  const pref = (process.env.LLM_PROVIDER || "").toLowerCase();
+  const useAnthropic = pref === "anthropic" || (pref !== "gemini" && !!process.env.ANTHROPIC_API_KEY);
+  if (useAnthropic) {
+    const model = process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
+    const friendly: Record<string, string> = {
+      "claude-opus-4-8": "Claude Opus 4.8",
+      "claude-opus-4-7": "Claude Opus 4.7",
+      "claude-sonnet-4-6": "Claude Sonnet 4.6",
+    };
+    return friendly[model] || `Claude (${model})`;
+  }
+  return "Gemini (free tier)";
+}
+
 function quotaMessage(raw: string): string {
   // Anthropic: low/empty credit balance.
   if (/credit balance|billing|insufficient|payment/i.test(raw)) {
@@ -381,7 +400,7 @@ app.post("/api/analyze", async (req, res) => {
   try {
     const a = await analyze(url);
     clearTimeout(timeout);
-    if (!res.headersSent) res.json({ ...a, lenses: INTERVIEW_LENSES });
+    if (!res.headersSent) res.json({ ...a, lenses: INTERVIEW_LENSES, provider: providerLabel() });
   } catch (err) {
     clearTimeout(timeout);
     if (!res.headersSent) res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
