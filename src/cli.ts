@@ -4,7 +4,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { optimize } from "./optimize.js";
-import { GeminiProvider } from "./llm.js";
+import { createProvider } from "./llm.js";
 
 // Minimal .env loader (avoid a dependency for one file).
 function loadEnv(): void {
@@ -23,7 +23,7 @@ async function main(): Promise<void> {
     console.error("Usage: npm run optimize -- <post-url>");
     process.exit(1);
   }
-  const provider = new GeminiProvider();
+  const provider = createProvider();
   console.error(`Optimizing ${url} via ${provider.name}…`);
   const r = await optimize(url, provider);
 

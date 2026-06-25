@@ -7,6 +7,7 @@
 // We don't need grounding (pure analysis/rewrite). We DO need 429 backoff.
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import Anthropic from "@anthropic-ai/sdk";
 import type { LlmProvider } from "./types.js";
 
 const MAX_RETRIES = 4;
@@ -79,6 +80,76 @@ export class GeminiProvider implements LlmProvider {
     const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
     throw new Error(`All Gemini models failed (${this.models.join(", ")}). Last error: ${msg}`);
   }
+}
+
+/**
+ * Anthropic Claude provider. This is the strongest option for the voice-preserving
+ * rewrite — Opus 4.8 follows the "sound like the original author, don't paraphrase"
+ * instructions far more faithfully than a free-tier Flash model.
+ *
+ * Design notes (per the Claude API guidance):
+ *  - Model: claude-opus-4-8 (configurable via ANTHROPIC_MODEL).
+ *  - Adaptive thinking ON — the rewrite is a nuanced editorial task; letting the
+ *    model reason before writing improves voice fidelity.
+ *  - STREAMING — the article body is long output; streaming avoids the SDK's
+ *    non-streaming HTTP-timeout guard at high max_tokens.
+ *  - We extract only the text blocks (thinking blocks are ignored).
+ */
+export class AnthropicProvider implements LlmProvider {
+  readonly name: string;
+  private client: Anthropic;
+  private model: string;
+
+  constructor(apiKey = process.env.ANTHROPIC_API_KEY, model = process.env.ANTHROPIC_MODEL || "claude-opus-4-8") {
+    if (!apiKey) {
+      throw new Error("ANTHROPIC_API_KEY is not set. Add it to .env (get a key with credits at https://console.anthropic.com).");
+    }
+    this.client = new Anthropic({ apiKey });
+    this.model = model;
+    this.name = `anthropic:${model}`;
+  }
+
+  async complete(prompt: string, opts?: { json?: boolean }): Promise<string> {
+    // For JSON requests, a system instruction keeps the model from wrapping the
+    // object in prose; the downstream extractJson() still strips any stray fences.
+    const params: Record<string, unknown> = {
+      model: this.model,
+      max_tokens: 32000,
+      thinking: { type: "adaptive" },
+      messages: [{ role: "user", content: prompt }],
+    };
+    if (opts?.json) {
+      params.system =
+        "Output ONLY the JSON value requested — no markdown fences, no commentary, no leading or trailing prose.";
+    }
+    // Cast to whatever the installed SDK's stream() expects (keeps us version-proof
+    // even if the local types don't yet know the "adaptive" thinking variant).
+    const messages = this.client.messages;
+    const stream = messages.stream(params as Parameters<typeof messages.stream>[0]);
+    const msg = await stream.finalMessage();
+    const text = msg.content
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { text: string }).text)
+      .join("");
+    if (!text.trim()) {
+      const reason = msg.stop_reason ? ` (stop_reason: ${msg.stop_reason})` : "";
+      throw new Error(`Anthropic returned no text content${reason}.`);
+    }
+    return text;
+  }
+}
+
+/**
+ * Pick the LLM provider. Prefers Anthropic (Claude Opus 4.8 — the strongest
+ * rewrite, best at voice preservation) when ANTHROPIC_API_KEY is set; otherwise
+ * falls back to Gemini. Force one explicitly with LLM_PROVIDER=anthropic|gemini.
+ */
+export function createProvider(): LlmProvider {
+  const pref = (process.env.LLM_PROVIDER || "").toLowerCase();
+  if (pref === "gemini") return new GeminiProvider();
+  if (pref === "anthropic") return new AnthropicProvider();
+  if (process.env.ANTHROPIC_API_KEY) return new AnthropicProvider();
+  return new GeminiProvider();
 }
 
 /**

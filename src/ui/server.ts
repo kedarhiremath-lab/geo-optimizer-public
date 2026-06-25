@@ -7,7 +7,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { analyze, optimize } from "../optimize.js";
-import { GeminiProvider } from "../llm.js";
+import { createProvider } from "../llm.js";
 import { INTERVIEW_LENSES } from "../interview.js";
 
 // Demo safety net: cache the last successful optimization per URL. If the live
@@ -348,11 +348,18 @@ function badUrl(url: string): boolean {
 }
 
 function quotaMessage(raw: string): string {
-  if (/429|quota|rate.?limit|resource.?exhausted|all gemini models failed/i.test(raw)) {
+  // Anthropic: low/empty credit balance.
+  if (/credit balance|billing|insufficient|payment/i.test(raw)) {
     return (
-      "All free-tier daily quotas are exhausted (the app already tried fallback models, " +
-      "each ~20 requests/day). Wait for the daily reset (midnight Pacific) or add billing to " +
-      "your Google project to remove the cap."
+      "The Anthropic account is out of credits. Add credits at https://console.anthropic.com " +
+      "(Billing) to keep using Claude Opus, or set GEMINI_API_KEY + LLM_PROVIDER=gemini to fall back."
+    );
+  }
+  // Gemini free-tier daily quota / rate limits / either-provider overload.
+  if (/429|quota|rate.?limit|resource.?exhausted|overloaded|529|all gemini models failed/i.test(raw)) {
+    return (
+      "The model is rate-limited or the free-tier daily quota is exhausted. Wait a moment and retry, " +
+      "or add billing to remove the cap (Anthropic: console.anthropic.com; Google: aistudio.google.com)."
     );
   }
   return raw;
@@ -390,15 +397,15 @@ app.post("/api/optimize", async (req, res) => {
     if (!res.headersSent) res.status(504).json({ error: "Optimization timed out (>3min). Try again." });
   }, 180_000);
   try {
-    const result = await optimize(url, new GeminiProvider(), { answers });
+    const result = await optimize(url, createProvider(), { answers });
     clearTimeout(timeout);
     saveResult(url, result); // cache the latest good result for the demo safety net
     if (!res.headersSent) res.json(result);
   } catch (err) {
     clearTimeout(timeout);
     const raw = err instanceof Error ? err.message : String(err);
-    // Demo safety net: on quota/transient failure, serve the last good result.
-    if (/429|quota|rate.?limit|resource.?exhausted|all gemini models failed/i.test(raw)) {
+    // Demo safety net: on quota/credit/transient failure, serve the last good result.
+    if (/429|quota|rate.?limit|resource.?exhausted|overloaded|529|credit balance|billing|all gemini models failed/i.test(raw)) {
       const cached = loadResult(url) as Record<string, unknown> | null;
       if (cached) {
         if (!res.headersSent) res.json({ ...cached, servedFromCache: true });
