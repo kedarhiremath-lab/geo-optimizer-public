@@ -306,9 +306,11 @@ function renderResult(d){
     h+='<div class="card full"><h3>Who this is for</h3><div class="prose"><ul>'+
        c.whoThisIsFor.map(s=>'<li>'+esc(s)+'</li>').join('')+'</ul></div></div>';
   }
-  // Optimized article body
+  // Optimized article — the ORIGINAL title prints first (verbatim, never rewritten),
+  // then the optimized body.
+  const titleMd=d.title?('# '+d.title+'\n\n'):'';
   h+='<div class="card full"><div class="codehead"><h3>Optimized article</h3>'+copyBtn("full","Copy full article (Markdown)")+'</div>'+
-     '<div class="prose">'+mdToHtml(c.articleMarkdown||"")+'</div></div>';
+     '<div class="prose">'+mdToHtml(titleMd+(c.articleMarkdown||""))+'</div></div>';
   // FAQ
   if((c.faq||[]).length){
     h+='<div class="card full"><h3>FAQ</h3><div class="prose">'+

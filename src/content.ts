@@ -76,6 +76,9 @@ export function assembleContent(articleMarkdown: string, meta: OptimizedMeta): O
  */
 export function composeArticle(content: OptimizedContent, title: string, leadQuery?: string): string {
   const out: string[] = [];
+  // TITLE FIRST, ALWAYS — the original article title, preserved verbatim. Nothing
+  // is printed above it.
+  if (title) out.push(`# ${title}`);
   // Answer-first lead. PREFER the author's own opening: if the body already opens
   // on-topic (covers most of the primary query's words in its first lines), use
   // it as-is to preserve voice. Only fall back to a synthesized lead if the
@@ -91,7 +94,6 @@ export function composeArticle(content: OptimizedContent, title: string, leadQue
       out.push(`To ${topic}, ${step}`);
     }
   }
-  if (title) out.push(`# ${title}`);
   if (content.shortVersion.length) {
     out.push("## The Short Version");
     out.push(content.shortVersion.map((s) => `- ${s}`).join("\n"));

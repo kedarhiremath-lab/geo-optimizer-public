@@ -46,4 +46,13 @@ describe("assembleContent + composeArticle", () => {
     expect(full).toContain("## Frequently Asked Questions");
     expect(full).toContain("When is a demo ready?");
   });
+
+  it("always prints the original title FIRST — even when an answer-first lead is injected", () => {
+    const meta = parseOptimizedMeta(goodMeta);
+    // Body opens off-topic so a synthetic answer-first lead is added.
+    const content = assembleContent("Some unrelated opening paragraph.", meta);
+    const full = composeArticle(content, "Navigating the New Era of AI and Robotics", "how do I move a robotics pilot to production");
+    // The very first line must be the original title, nothing above it.
+    expect(full.split("\n")[0]).toBe("# Navigating the New Era of AI and Robotics");
+  });
 });

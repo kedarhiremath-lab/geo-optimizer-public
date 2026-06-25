@@ -248,6 +248,7 @@ export async function optimize(
 
   return {
     url,
+    title: article.title, // original title, preserved verbatim
     baselineScore: scored.baselineScore,
     modelScore,
     optimizedScore,

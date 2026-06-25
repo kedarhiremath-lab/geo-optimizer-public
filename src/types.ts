@@ -92,6 +92,8 @@ export interface OptimizedContent {
 
 export interface OptimizeResult {
   url: string;
+  /** The ORIGINAL article title, preserved verbatim (never rewritten). Rendered first. */
+  title: string;
   baselineScore: number;
   /** Score of the model's own rewrite, BEFORE deterministic guarantees (raw model quality). */
   modelScore: number;
