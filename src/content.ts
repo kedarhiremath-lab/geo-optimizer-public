@@ -83,8 +83,13 @@ export function composeArticle(content: OptimizedContent, title: string, leadQue
   // on-topic (covers most of the primary query's words in its first lines), use
   // it as-is to preserve voice. Only fall back to a synthesized lead if the
   // author's opening doesn't address the query.
-  if (leadQuery && content.shortVersion.length) {
-    const topic = leadQuery.replace(/^how\s+(do\s+i|can\s+i|to)\s+/i, "").trim();
+  // Only synthesize a "To <do X>, <step>" lead when the query is a verb-phrase
+  // ("how do I move a pilot to production"). For a noun-phrase topic derived from
+  // a title (e.g. "Trossen Docs MCP Server"), that template would be ungrammatical
+  // — so we skip it and let the author's own opening stand (better for voice anyway).
+  const isVerbQuery = !!leadQuery && /^how\s+(do\s+i|can\s+i|to)\s+/i.test(leadQuery);
+  if (isVerbQuery && content.shortVersion.length) {
+    const topic = leadQuery!.replace(/^how\s+(do\s+i|can\s+i|to)\s+/i, "").trim();
     const stop = new Set(["how", "do", "i", "a", "to", "the", "or", "of", "for", "is", "what", "in", "an"]);
     const qWords = topic.toLowerCase().split(/\s+/).filter((w) => w.length > 2 && !stop.has(w));
     const opening = content.articleMarkdown.replace(/^#{1,3}\s+.*$/gm, "").replace(/\s+/g, " ").trim().slice(0, 400).toLowerCase();

@@ -9,7 +9,7 @@ import { articleBodyPrompt, structuredMetaPrompt } from "./prompts.js";
 import { claimDiff } from "./claimDiff.js";
 import { buildSchemas } from "./schema.js";
 import { parseOptimizedMeta, assembleContent, composeArticle } from "./content.js";
-import { TROSSEN_BLUEPRINT_CONFIG } from "./config.js";
+import { deriveConfig } from "./config.js";
 import type { LlmProvider, OptimizeResult, OptimizerConfig, OptimizedContent, Article } from "./types.js";
 import type { InterviewAnswers } from "./interview.js";
 
@@ -32,9 +32,11 @@ export interface AnalyzeResult {
  * rewrite call.
  */
 export async function analyze(url: string, opts: OptimizeOptions = {}): Promise<AnalyzeResult> {
-  const config = opts.config ?? TROSSEN_BLUEPRINT_CONFIG;
   const page = await fetchRendered(url, opts);
   const article = extractArticle(page);
+  // Per-article queries (from this article's title + headings), unless an explicit
+  // config override was supplied. Keeps the baseline score + fix-list on-topic.
+  const config = opts.config ?? deriveConfig(article);
   const scored = scoreOriginal(article, config);
   return { url, title: article.title, baselineScore: scored.baselineScore, fixList: buildFixList(scored) };
 }
@@ -188,10 +190,12 @@ export async function optimize(
   provider: LlmProvider,
   opts: OptimizeOptions = {},
 ): Promise<OptimizeResult> {
-  const config = opts.config ?? TROSSEN_BLUEPRINT_CONFIG;
-
   const page = await fetchRendered(url, opts);
   const article = extractArticle(page);
+  // Per-article queries (from this article's title + headings), unless an explicit
+  // config override was supplied. Drives the rewrite, scoring, and guarantees all
+  // on this article's actual topic — no off-topic query bleed.
+  const config = opts.config ?? deriveConfig(article);
 
   const scored = scoreOriginal(article, config);
   const fixList = buildFixList(scored);
