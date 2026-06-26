@@ -277,6 +277,7 @@ function renderResult(d){
   const c=d.content||{}, m=c.metadata||{};
   const safe=d.safe, delta=d.optimizedScore-d.baselineScore, ds=(delta>=0?"+":"")+delta;
   const ms=(d.modelScore!==undefined)?d.modelScore:d.optimizedScore;
+  const ed=d.editorial;
   let h='';
   if(d.servedFromCache){ h+='<div class="hint" style="margin:.2rem 0 .6rem;color:var(--warn)">Showing the last saved result for this URL (live AI quota is exhausted right now).</div>'; }
   h+='<div class="grid">';
@@ -292,6 +293,17 @@ function renderResult(d){
      '<div class="badge '+(safe?"ok":"no")+'">'+(safe?"✓ safe to use":"⚠ needs review")+'</div></div>';
   h+='<div class="card"><h3>Fixes applied</h3><ol class="fixes">'+
      d.fixList.map(f=>'<li><b>'+esc(f.label)+'</b></li>').join('')+'</ol></div></div>';
+  // Editorial Preservation Mode — publish-readiness banner
+  if(ed){
+    if(!ed.publishReady){
+      h+='<div class="card full flag"><h3>⛔ Do not publish yet — '+ed.doNotPublishReasons.length+' editorial gate(s) failed</h3>'+
+         '<p class="hint" style="margin:.2rem 0 .6rem">Fix these before publishing (or re-run). Title/subtitle preservation and voice are non-negotiable.</p>'+
+         '<ul>'+ed.doNotPublishReasons.map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul></div>';
+    } else {
+      h+='<div class="card full"><h3>✅ Publish-ready — all editorial gates passed</h3>'+
+         '<p class="hint" style="margin:.2rem 0 0">Title + subtitles preserved, voice intact, easier to read than the original.</p></div>';
+    }
+  }
   if(!d.claimDiff.passed){
     h+='<div class="card full flag"><h3>⚠ Claims to verify before publishing</h3>'+
        '<p class="hint" style="margin:.2rem 0 .6rem">In the rewrite but not clearly grounded in the source — confirm or remove each.</p>'+
@@ -312,6 +324,37 @@ function renderResult(d){
   const titleMd=d.title?('# '+d.title+'\\n\\n'):'';
   h+='<div class="card full"><div class="codehead"><h3>Optimized article</h3>'+copyBtn("full","Copy full article (Markdown)")+'</div>'+
      '<div class="prose">'+mdToHtml(titleMd+(c.articleMarkdown||""))+'</div></div>';
+  // Editorial Preservation Mode — readability, change budget, QA checklist
+  if(ed){
+    const b=ed.budget, bf=ed.before, af=ed.after;
+    const arrow=(x,y,unit)=>x+(unit||'')+' → '+y+(unit||'');
+    h+='<div class="card full"><h3>Readability — before → after</h3><div class="meta">'+
+       metaRow("Reading friction (lower = easier)", arrow(bf.readingFriction,af.readingFriction))+
+       metaRow("Cognitive load (lower = easier)", arrow(bf.cognitiveLoad,af.cognitiveLoad))+
+       metaRow("Estimated reading time", arrow(bf.readingTimeMin,af.readingTimeMin,' min'))+
+       metaRow("Avg paragraph length", arrow(bf.avgParagraphLength,af.avgParagraphLength,' words'))+
+       metaRow("Dense paragraphs", arrow(bf.paragraphDensityPct,af.paragraphDensityPct,'%'))+
+       '</div></div>';
+    h+='<div class="card full"><h3>Editorial Change Budget</h3><div class="meta">'+
+       metaRow("Sentences rewritten", b.sentencesRewrittenPct+'%')+
+       metaRow("Original wording preserved", b.wordingPreservedPct+'%')+
+       metaRow("Voice preservation score", b.voicePreservationScore+'/100')+
+       metaRow("Paragraphs split", String(b.paragraphsSplit))+
+       metaRow("Headings preserved", String(b.headingsPreserved))+
+       metaRow("Headings changed", String(b.headingsChanged))+
+       metaRow("Duplicate headings removed", String(b.duplicateHeadingsRemoved))+
+       metaRow("Claims added", String(b.claimsAdded))+
+       metaRow("Claims removed", String(b.claimsRemoved))+
+       '</div></div>';
+    h+='<div class="card full"><h3>QA checklist</h3><ul style="list-style:none;padding-left:0;margin:.4rem 0">'+
+       ed.gates.map(g=>'<li style="margin:.32rem 0">'+(g.pass?'<span style="color:#39d98a">✓</span>':'<span style="color:#ff6b6b">✗</span>')+' '+esc(g.label)+(g.detail?' <span class="hint">— '+esc(g.detail)+'</span>':'')+'</li>').join('')+
+       '</ul></div>';
+    if((ed.optionalSeoRecs||[]).length){
+      h+='<div class="card full"><h3>Optional SEO/GEO recommendations (not applied — title &amp; subtitles preserved)</h3>'+
+         '<p class="hint" style="margin:.2rem 0 .6rem">Apply these in your CMS metadata if you want; they were intentionally kept OUT of the article body.</p>'+
+         '<div class="prose"><ul>'+ed.optionalSeoRecs.map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul></div></div>';
+    }
+  }
   // FAQ
   if((c.faq||[]).length){
     h+='<div class="card full"><h3>FAQ</h3><div class="prose">'+

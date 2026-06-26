@@ -90,6 +90,53 @@ export interface OptimizedContent {
   assetRecommendations: string[]; // #5/#9 visual->HTML + downloadable asset recs
 }
 
+/** Editorial Preservation Mode — deterministic readability metrics (lower = easier). */
+export interface ReadabilityMetrics {
+  readingFriction: number; // 0-100
+  cognitiveLoad: number; // 0-100
+  readingTimeMin: number;
+  avgParagraphLength: number; // words per prose paragraph
+  paragraphDensityPct: number; // % of paragraphs that are dense (>80 words)
+}
+
+/** The Editorial Change Budget report (how much of the author survived the edit). */
+export interface EditorialReport {
+  sentencesRewrittenPct: number;
+  wordingPreservedPct: number;
+  paragraphsSplit: number;
+  sectionsMoved: number;
+  headingsChanged: number;
+  headingsPreserved: number;
+  duplicateHeadingsRemoved: number;
+  claimsAdded: number;
+  claimsRemoved: number;
+  readingTimeBefore: number;
+  readingTimeAfter: number;
+  avgParagraphLengthBefore: number;
+  avgParagraphLengthAfter: number;
+  voicePreservationScore: number;
+}
+
+/** A single "Do Not Publish If" quality gate. */
+export interface EditorialGate {
+  id: string;
+  label: string;
+  pass: boolean;
+  detail: string;
+}
+
+/** Editorial Preservation Mode layer, returned alongside the existing outputs. */
+export interface EditorialResult {
+  before: ReadabilityMetrics;
+  after: ReadabilityMetrics;
+  budget: EditorialReport;
+  gates: EditorialGate[];
+  publishReady: boolean;
+  doNotPublishReasons: string[];
+  /** SEO/GEO ideas deliberately NOT applied because title/subtitle preservation won. */
+  optionalSeoRecs: string[];
+}
+
 export interface OptimizeResult {
   url: string;
   /** The ORIGINAL article title, preserved verbatim (never rewritten). Rendered first. */
@@ -108,8 +155,10 @@ export interface OptimizeResult {
   schemas: Record<string, unknown>[];
   schemaNotes: string[];
   claimDiff: ClaimDiffResult;
-  /** Overall pass/fail gate: claimDiff passed AND at least the Article schema valid. */
+  /** Overall pass/fail gate: claimDiff passed, Article schema valid, AND editorial gates pass. */
   safe: boolean;
+  /** Editorial Preservation Mode layer (readability, change budget, publish gates). */
+  editorial: EditorialResult;
 }
 
 /** Frozen prompt set + checklist config (defaults in config.ts). */

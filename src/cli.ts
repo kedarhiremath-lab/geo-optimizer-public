@@ -31,6 +31,17 @@ async function main(): Promise<void> {
   console.log(`GEO/SEO score: ${r.baselineScore} (original) -> ${r.modelScore} (model rewrite) -> ${r.optimizedScore}/100 (fully optimized)`);
   console.log(`Safe to use: ${r.safe ? "YES" : "NO — review flags below"}`);
 
+  if (r.editorial) {
+    const e = r.editorial, b = e.budget;
+    console.log(`\n--- Editorial Preservation Mode ---`);
+    console.log(`Publish-ready: ${e.publishReady ? "YES" : "NO"}`);
+    if (!e.publishReady) e.doNotPublishReasons.forEach((x) => console.log(`   ✗ ${x}`));
+    console.log(`Reading friction: ${e.before.readingFriction} -> ${e.after.readingFriction} | cognitive load: ${e.before.cognitiveLoad} -> ${e.after.cognitiveLoad}`);
+    console.log(`Reading time: ${e.before.readingTimeMin} -> ${e.after.readingTimeMin} min | avg paragraph: ${e.before.avgParagraphLength} -> ${e.after.avgParagraphLength} words`);
+    console.log(`Voice preservation: ${b.voicePreservationScore}/100 | wording preserved: ${b.wordingPreservedPct}% | sentences rewritten: ${b.sentencesRewrittenPct}%`);
+    console.log(`Headings preserved/changed: ${b.headingsPreserved}/${b.headingsChanged} | dupes removed: ${b.duplicateHeadingsRemoved} | claims added/removed: ${b.claimsAdded}/${b.claimsRemoved}`);
+  }
+
   console.log(`\n--- Prioritized fix-list ---`);
   r.fixList.forEach((f, i) => console.log(`${i + 1}. [p${f.priority}] ${f.label}: ${f.recommendation}`));
 

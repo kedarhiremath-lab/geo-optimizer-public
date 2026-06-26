@@ -5,6 +5,7 @@
 import { fetchRendered, type FetchOptions } from "./fetch.js";
 import { extractArticle } from "./extract.js";
 import { scoreOriginal, buildFixList, scoreOptimized, topicOverlap, countStats } from "./score.js";
+import { computeReadability, editorialChangeBudget, evaluateEditorialGates, dedupeTitle, splitDenseParagraphs } from "./editorial.js";
 import { articleBodyPrompt, structuredMetaPrompt } from "./prompts.js";
 import { claimDiff } from "./claimDiff.js";
 import { buildSchemas } from "./schema.js";
@@ -235,11 +236,17 @@ export async function optimize(
   // Deterministically guarantee the structural optimization signals (grounded,
   // not fabricated) so the FINAL score reliably lands 96-100 regardless of model.
   draft.articleMarkdown = ensureLinks(guaranteeRubric(draft.articleMarkdown, draft, article, config), article.links);
+  // Editorial Preservation Mode: deterministically split any dense paragraphs the
+  // model left, so the article is reliably easier to skim regardless of the model.
+  draft.articleMarkdown = splitDenseParagraphs(draft.articleMarkdown);
   const content = draft;
 
   // The full publishable article (for scoring, fact-check, and copy). The lead
-  // query makes the scored text open answer-first.
-  const fullArticle = composeArticle(content, article.title, config.primaryQueries[0]);
+  // query makes the scored text open answer-first. Then strip any duplicate of
+  // the title that slipped into the body (keep the first).
+  const composed = composeArticle(content, article.title, config.primaryQueries[0]);
+  const deduped = dedupeTitle(composed, article.title);
+  const fullArticle = deduped.md;
 
   const diff = await claimDiff(provider, article.text, fullArticle);
   const { schemas, notes, articleValid } = buildSchemas(article, content);
@@ -249,6 +256,56 @@ export async function optimize(
     whoCount: content.whoThisIsFor.length,
     shortCount: content.shortVersion.length,
   });
+
+  // ── Editorial Preservation Mode layer ──────────────────────────────────────
+  // Compare the ORIGINAL body vs the OPTIMIZED body (apples-to-apples), then run
+  // the publish gates. All deterministic — no extra LLM call.
+  const before = computeReadability(article.content);
+  const after = computeReadability(content.articleMarkdown);
+  // Claims removed/added (stat-level proxy + the LLM claim-diff for additions).
+  const origStats = new Set(countStats(article.text).map((s) => s.toLowerCase()));
+  const optStats = new Set(countStats(content.articleMarkdown).map((s) => s.toLowerCase()));
+  const claimsRemoved = [...origStats].filter((s) => !optStats.has(s)).length;
+  const budget = editorialChangeBudget({
+    origBody: article.content,
+    optBody: content.articleMarkdown,
+    origHeadings: article.headings,
+    origMetrics: before,
+    optMetrics: after,
+    claimsAdded: diff.added.length,
+    claimsRemoved,
+    duplicateHeadingsRemoved: deduped.removed,
+    title: article.title,
+  });
+  const gateResult = evaluateEditorialGates({
+    origBody: article.content,
+    optBody: content.articleMarkdown,
+    origHeadings: article.headings,
+    published: fullArticle,
+    title: article.title,
+    before,
+    after,
+    report: budget,
+    claimDiffPassed: diff.passed,
+  });
+  // Optional SEO/GEO recommendations — surfaced, NOT applied (title/subtitle
+  // preservation wins). Only include suggestions that differ from the original.
+  const optionalSeoRecs: string[] = [];
+  if (content.metadata.title && content.metadata.title.trim() !== article.title.trim()) {
+    optionalSeoRecs.push(`Suggested SEO <title> tag: "${content.metadata.title}" (kept original title in the article).`);
+  }
+  if (content.metadata.slug) optionalSeoRecs.push(`Suggested URL slug: "${content.metadata.slug}".`);
+  if (content.metadata.metaDescription) optionalSeoRecs.push(`Suggested meta description: "${content.metadata.metaDescription}".`);
+
+  const editorial = {
+    before,
+    after,
+    budget,
+    gates: gateResult.gates,
+    publishReady: gateResult.publishReady,
+    doNotPublishReasons: gateResult.reasons,
+    optionalSeoRecs,
+  };
 
   return {
     url,
@@ -262,6 +319,7 @@ export async function optimize(
     schemas,
     schemaNotes: notes,
     claimDiff: diff,
-    safe: diff.passed && articleValid,
+    safe: diff.passed && articleValid && gateResult.publishReady,
+    editorial,
   };
 }
