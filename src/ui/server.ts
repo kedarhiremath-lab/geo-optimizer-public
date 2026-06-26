@@ -236,7 +236,7 @@ async function doOptimize(){
   const answers=collectAnswers();
   $("#gen").disabled=true;
   $("#status").className="status";
-  $("#status").innerHTML='<span class="spinner"></span>Rewriting in the author\'s voice with '+esc(CTX.provider||"the configured model")+' (~30–90s)…';
+  $("#status").innerHTML='<span class="spinner"></span>Rewriting in the voice of the original author, using '+esc(CTX.provider||"the configured model")+' (~30–90s)…';
   $("#out").innerHTML="";
   try{
     const r=await fetch("/api/optimize",{method:"POST",headers:{"content-type":"application/json"},
@@ -309,7 +309,7 @@ function renderResult(d){
   }
   // Optimized article — the ORIGINAL title prints first (verbatim, never rewritten),
   // then the optimized body.
-  const titleMd=d.title?('# '+d.title+'\n\n'):'';
+  const titleMd=d.title?('# '+d.title+'\\n\\n'):'';
   h+='<div class="card full"><div class="codehead"><h3>Optimized article</h3>'+copyBtn("full","Copy full article (Markdown)")+'</div>'+
      '<div class="prose">'+mdToHtml(titleMd+(c.articleMarkdown||""))+'</div></div>';
   // FAQ
