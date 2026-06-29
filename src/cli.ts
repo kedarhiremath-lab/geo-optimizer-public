@@ -42,6 +42,15 @@ async function main(): Promise<void> {
     console.log(`Headings preserved/changed: ${b.headingsPreserved}/${b.headingsChanged} | dupes removed: ${b.duplicateHeadingsRemoved} | claims added/removed: ${b.claimsAdded}/${b.claimsRemoved}`);
   }
 
+  if (r.scoreExplain) {
+    const se = r.scoreExplain;
+    console.log(`\n--- Score explainer (deterministic rubric) ---`);
+    se.signals.forEach((s) => console.log(`   ${s.earned}/${s.max}  ${s.label} (${s.note})`));
+    console.log(`Highest-leverage changes left:`);
+    se.topImprovements.forEach((t) => console.log(`   +${t.gain} ${t.how}`));
+    if (se.sourceLimited.length) console.log(`Source-limited: ${se.sourceLimited.join(", ")}`);
+  }
+
   console.log(`\n--- Prioritized fix-list ---`);
   r.fixList.forEach((f, i) => console.log(`${i + 1}. [p${f.priority}] ${f.label}: ${f.recommendation}`));
 

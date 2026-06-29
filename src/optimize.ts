@@ -4,8 +4,9 @@
 
 import { fetchRendered, type FetchOptions } from "./fetch.js";
 import { extractArticle } from "./extract.js";
-import { scoreOriginal, buildFixList, scoreOptimized, topicOverlap, countStats } from "./score.js";
+import { scoreOriginal, buildFixList, scoreOptimized, topicOverlap, countStats, explainScore, articleFromMarkdown } from "./score.js";
 import { computeReadability, editorialChangeBudget, evaluateEditorialGates, dedupeTitle, splitDenseParagraphs } from "./editorial.js";
+import { traceInterview } from "./trace.js";
 import { articleBodyPrompt, structuredMetaPrompt } from "./prompts.js";
 import { claimDiff } from "./claimDiff.js";
 import { buildSchemas } from "./schema.js";
@@ -307,6 +308,15 @@ export async function optimize(
     optionalSeoRecs,
   };
 
+  // Score explainability + interview/CEO traceability (both deterministic).
+  const scoreExplain = explainScore(articleFromMarkdown(fullArticle, scoredBase), config, {
+    faqCount: content.faq.length,
+    schemaCount: schemas.length,
+    whoCount: content.whoThisIsFor.length,
+    shortCount: content.shortVersion.length,
+  });
+  const interviewTrace = traceInterview(opts.answers, fullArticle);
+
   return {
     url,
     title: article.title, // original title, preserved verbatim
@@ -321,5 +331,7 @@ export async function optimize(
     claimDiff: diff,
     safe: diff.passed && articleValid && gateResult.publishReady,
     editorial,
+    scoreExplain,
+    interviewTrace,
   };
 }

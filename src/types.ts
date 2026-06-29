@@ -137,6 +137,41 @@ export interface EditorialResult {
   optionalSeoRecs: string[];
 }
 
+/** One row of the score breakdown — what a signal measures and what it earned. */
+export interface ScoreSignal {
+  id: string;
+  label: string;
+  earned: number;
+  max: number;
+  note: string;
+}
+
+/** A full, narrated explanation of a score (drivers + highest-leverage gains). */
+export interface ScoreExplanation {
+  total: number;
+  signals: ScoreSignal[];
+  drivers: { label: string; earned: number; max: number }[];
+  topImprovements: { label: string; gain: number; how: string }[];
+  sourceLimited: string[];
+}
+
+/** One traced interview answer: the context the author gave and whether it landed. */
+export interface InterviewTraceItem {
+  q: string;
+  answer: string;
+  applied: "yes" | "partial" | "no" | "directional";
+  note: string;
+}
+
+/** Traceability for one skill lens (e.g. the CEO review lens). */
+export interface InterviewTraceLens {
+  skill: string;
+  label: string;
+  intent: string;
+  used: boolean;
+  items: InterviewTraceItem[];
+}
+
 export interface OptimizeResult {
   url: string;
   /** The ORIGINAL article title, preserved verbatim (never rewritten). Rendered first. */
@@ -159,6 +194,10 @@ export interface OptimizeResult {
   safe: boolean;
   /** Editorial Preservation Mode layer (readability, change budget, publish gates). */
   editorial: EditorialResult;
+  /** Per-signal explanation of the optimized GEO/SEO score (drivers + top gains). */
+  scoreExplain: ScoreExplanation;
+  /** Traceability of the skills-interview answers (incl. the CEO review lens). */
+  interviewTrace: InterviewTraceLens[];
 }
 
 /** Frozen prompt set + checklist config (defaults in config.ts). */

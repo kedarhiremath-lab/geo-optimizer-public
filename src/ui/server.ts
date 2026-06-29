@@ -355,6 +355,46 @@ function renderResult(d){
          '<div class="prose"><ul>'+ed.optionalSeoRecs.map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul></div></div>';
     }
   }
+  // Score explainer — what the number measures + highest-leverage changes
+  if(d.scoreExplain){
+    const se=d.scoreExplain;
+    h+='<div class="card full"><h3>Score explainer — what the '+d.optimizedScore+'/100 measures</h3>'+
+       '<p class="hint" style="margin:.2rem 0 .6rem">A deterministic on-page GEO/SEO rubric — not an AI opinion and not live ranking data. Each signal earns fixed points; the total is capped at 100.</p>'+
+       '<div class="meta">'+
+       se.signals.map(s=>'<div class="metarow"><span class="metak">'+esc(s.label)+'</span><span class="metav">'+s.earned+' / '+s.max+' <span class="hint">'+esc(s.note)+'</span></span></div>').join('')+
+       '</div>';
+    if((se.topImprovements||[]).length){
+      h+='<h4 style="margin:.9rem 0 .3rem;font-size:.95rem">Highest-leverage changes left</h4>'+
+         '<ul style="margin:.2rem 0;padding-left:1.2rem">'+
+         se.topImprovements.map(t=>'<li style="margin:.25rem 0"><b>+'+t.gain+' pts</b> — '+esc(t.how)+'</li>').join('')+'</ul>';
+    }
+    if((se.sourceLimited||[]).length){
+      h+='<p class="hint" style="margin:.5rem 0 0">Source-limited (ceiling depends on how rich the original article is): '+se.sourceLimited.map(esc).join(', ')+'. A first-attempt 90s score needs a substantial source — the engine guarantees the structural signals; thin posts legitimately land lower.</p>';
+    }
+    h+='</div>';
+  }
+  // Skills interview traceability (incl. the CEO review lens)
+  if(d.interviewTrace){
+    const used=d.interviewTrace.filter(l=>l.used);
+    h+='<div class="card full"><h3>Skills interview traceability</h3>';
+    if(!used.length){
+      h+='<p class="hint" style="margin:.2rem 0 0">No interview answers were provided this run — so no lens (including the CEO review lens) steered the rewrite. Answer the interview to add traceable editorial direction; each answer is then tracked as applied / partial / not applied below.</p>';
+    } else {
+      h+='<p class="hint" style="margin:.2rem 0 .6rem">The context you supplied, and whether it landed in the optimized article. The CEO review lens is highlighted.</p>';
+      for(const lens of used){
+        const isCeo=lens.skill==='plan-ceo-review';
+        h+='<div style="margin:.7rem 0;'+(isCeo?'border-left:3px solid var(--accent);padding-left:.7rem':'')+'">'+
+           '<div><b>'+esc(lens.label)+'</b> <span class="skilltag">/'+esc(lens.skill)+'</span>'+(isCeo?' <span class="hint">— CEO skill</span>':'')+'</div>'+
+           '<ul style="list-style:none;padding-left:0;margin:.3rem 0">'+
+           lens.items.map(it=>{
+             const badge=it.applied==='yes'?'<span style="color:#39d98a">✓ applied</span>':it.applied==='partial'?'<span style="color:#e0b341">◐ partial</span>':it.applied==='no'?'<span style="color:#ff6b6b">✗ not applied</span>':'<span class="hint">↪ directional</span>';
+             return '<li style="margin:.4rem 0"><div class="hint">'+esc(it.q)+'</div><div>“'+esc(it.answer)+'” — '+badge+'</div><div class="hint">'+esc(it.note)+'</div></li>';
+           }).join('')+
+           '</ul></div>';
+      }
+    }
+    h+='</div>';
+  }
   // FAQ
   if((c.faq||[]).length){
     h+='<div class="card full"><h3>FAQ</h3><div class="prose">'+
