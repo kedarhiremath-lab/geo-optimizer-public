@@ -323,11 +323,12 @@ export async function optimize(
   });
   // Optional SEO/GEO recommendations — surfaced, NOT applied (title/subtitle
   // preservation wins). Only include suggestions that differ from the original.
+  // NOTE: we deliberately do NOT recommend a URL slug change — changing the slug
+  // breaks existing links (user directive). The slug is shown for reference only.
   const optionalSeoRecs: string[] = [];
   if (content.metadata.title && content.metadata.title.trim() !== article.title.trim()) {
-    optionalSeoRecs.push(`Suggested SEO <title> tag: "${content.metadata.title}" (kept original title in the article).`);
+    optionalSeoRecs.push(`Suggested SEO <title> tag: "${content.metadata.title}" (the article's visible H1 title stays unchanged).`);
   }
-  if (content.metadata.slug) optionalSeoRecs.push(`Suggested URL slug: "${content.metadata.slug}".`);
   if (content.metadata.metaDescription) optionalSeoRecs.push(`Suggested meta description: "${content.metadata.metaDescription}".`);
 
   const editorial = {

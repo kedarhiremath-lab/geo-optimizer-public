@@ -246,21 +246,34 @@ async function doOptimize(){
     const d=await r.json(); if(!r.ok)throw new Error(d.error||"failed");
     $("#status").innerHTML="";
     $("#out").innerHTML='<div class="step">Step 3 · Optimized result</div>'+renderResult(d);
-    bindCopies();
+    bindCopies(); bindFigDownloads(); bindWixCopy(); bindSeoRecs();
     $("#out").scrollIntoView({behavior:"smooth",block:"start"});
   }catch(e){$("#status").className="status err";$("#status").textContent=e.message;}
   finally{$("#gen").disabled=false;}
 }
 
 function mdToHtml(md){
-  const inline=s=>esc(s).replace(/\\*\\*([^*]+)\\*\\*/g,"<strong>$1</strong>");
+  const inline=s=>esc(s)
+    .replace(/\\*\\*([^*]+)\\*\\*/g,"<strong>$1</strong>")
+    .replace(/\\[([^\\]]+)\\]\\((https?:[^)]+)\\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  const cells=r=>r.trim().replace(/^\\|/,"").replace(/\\|$/,"").split("|").map(c=>inline(c.trim()));
   const lines=md.split(/\\r?\\n/);
   let html="",list=null,para=[];
   const flushP=()=>{ if(para.length){ html+="<p>"+inline(para.join(" "))+"</p>"; para=[]; } };
   const flushL=()=>{ if(list){ html+="</"+list+">"; list=null; } };
-  for(let raw of lines){
-    const line=raw.trim();
+  for(let i=0;i<lines.length;i++){
+    const raw=lines[i], line=raw.trim();
     if(!line){ flushP(); flushL(); continue; }
+    // raw HTML passthrough (e.g. <figure>, inline <svg>): output as-is, do not escape
+    if(line.charAt(0)==="<"){ flushP(); flushL(); html+=raw; continue; }
+    // table: a "| ... |" row followed by a "|---|---|" separator row
+    if(line.charAt(0)==="|" && i+1<lines.length && /-/.test(lines[i+1]) && /^\\s*\\|?[\\s:|-]+\\|/.test(lines[i+1])){
+      flushP(); flushL();
+      let t="<table><thead><tr>"+cells(line).map(c=>"<th>"+c+"</th>").join("")+"</tr></thead><tbody>";
+      i+=2;
+      while(i<lines.length && lines[i].trim().charAt(0)==="|"){ t+="<tr>"+cells(lines[i]).map(c=>"<td>"+c+"</td>").join("")+"</tr>"; i++; }
+      i--; html+=t+"</tbody></table>"; continue;
+    }
     let m;
     if(m=line.match(/^#\\s+(.*)/)){ flushP();flushL(); html+="<h1>"+inline(m[1])+"</h1>"; }
     else if(m=line.match(/^##\\s+(.*)/)){ flushP();flushL(); html+="<h2>"+inline(m[1])+"</h2>"; }
@@ -326,7 +339,9 @@ function renderResult(d){
   // Optimized article — the ORIGINAL title prints first (verbatim, never rewritten),
   // then the optimized body.
   const titleMd=d.title?('# '+d.title+'\\n\\n'):'';
-  h+='<div class="card full"><div class="codehead"><h3>Optimized article</h3>'+copyBtn("full","Copy full article (Markdown)")+'</div>'+
+  h+='<div class="card full"><div class="codehead"><h3>Optimized article</h3>'+
+     '<span style="display:flex;gap:.5rem"><button class="copy" data-cwix="1">Copy for Wix (formatted)</button>'+copyBtn("full","Copy Markdown")+'</span></div>'+
+     '<p class="hint" style="margin:.1rem 0 .4rem">“Copy for Wix” copies the whole article as rich text — paste straight into the Wix editor and headings, bold, lists, tables &amp; links keep their formatting. (Figures: use Download PNG above and Insert → Image.)</p>'+
      '<div class="prose">'+mdToHtml(titleMd+(c.articleMarkdown||""))+'</div></div>';
   // Editorial Preservation Mode — readability, change budget, QA checklist
   if(ed){
@@ -355,8 +370,16 @@ function renderResult(d){
        '</ul></div>';
     if((ed.optionalSeoRecs||[]).length){
       h+='<div class="card full"><h3>Optional SEO/GEO recommendations (not applied — title &amp; subtitles preserved)</h3>'+
-         '<p class="hint" style="margin:.2rem 0 .6rem">Apply these in your CMS metadata if you want; they were intentionally kept OUT of the article body.</p>'+
-         '<div class="prose"><ul>'+ed.optionalSeoRecs.map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul></div></div>';
+         '<p class="hint" style="margin:.2rem 0 .6rem">These are metadata suggestions kept OUT of the article body. Accept to use one (it applies to the page’s SEO metadata, not the visible article — your title, subtitles, and URL slug never change). Decline to leave it.</p>'+
+         '<ul style="list-style:none;padding-left:0;margin:.2rem 0">'+
+         ed.optionalSeoRecs.map((r,ri)=>'<li style="margin:.6rem 0;border-left:3px solid var(--line);padding-left:.7rem">'+
+           '<div>'+esc(r)+'</div>'+
+           '<div style="display:flex;gap:.5rem;align-items:center;margin:.35rem 0 0">'+
+             '<button class="copy seorec" data-seo="'+ri+'" data-act="accept">Accept</button>'+
+             '<button class="copy seorec" data-seo="'+ri+'" data-act="decline">Decline</button>'+
+             '<span class="seostat" id="seostat-'+ri+'" style="font-size:.85rem"></span>'+
+           '</div></li>').join('')+
+         '</ul></div>';
     }
   }
   // Recommended figures (machine-readable) — only when the source had no images
@@ -448,11 +471,30 @@ function renderResult(d){
 }
 function metaRow(k,v){ return '<div class="metarow"><span class="metak">'+esc(k)+'</span><span class="metav">'+esc(v||"—")+'</span></div>'; }
 function bindCopies(){
-  document.querySelectorAll(".copy:not(.figdl)").forEach(b=>b.onclick=async()=>{
+  document.querySelectorAll(".copy[data-c]").forEach(b=>b.onclick=async()=>{
     const key=b.dataset.c;
     const text=(RAW&&RAW[key]!==undefined)?RAW[key]:(($("#"+key)&&$("#"+key).textContent)||"");
     await navigator.clipboard.writeText(text);
     const o=b.textContent;b.textContent="Copied ✓";setTimeout(()=>b.textContent=o,1200);
+  });
+}
+async function copyHtml(html){
+  try{
+    const item=new ClipboardItem({"text/html":new Blob([html],{type:"text/html"}),"text/plain":new Blob([html.replace(/<[^>]+>/g," ")],{type:"text/plain"})});
+    await navigator.clipboard.write([item]);
+  }catch(e){ await navigator.clipboard.writeText(html); }
+}
+function bindWixCopy(){
+  document.querySelectorAll("[data-cwix]").forEach(b=>b.onclick=async()=>{
+    await copyHtml(mdToHtml(RAW.full||""));
+    const o=b.textContent;b.textContent="Copied ✓";setTimeout(()=>b.textContent=o,1200);
+  });
+}
+function bindSeoRecs(){
+  document.querySelectorAll(".seorec").forEach(b=>b.onclick=()=>{
+    const stat=$("#seostat-"+b.dataset.seo); if(!stat)return;
+    if(b.dataset.act==="accept") stat.innerHTML='<span style="color:#39d98a">✓ Accepted — apply in your Wix SEO settings (title tag / meta description).</span>';
+    else stat.innerHTML='<span class="hint">No changes.</span>';
   });
 }
 function downloadBlob(blob,filename){
