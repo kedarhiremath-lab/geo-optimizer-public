@@ -273,10 +273,12 @@ function mdToHtml(md){
   return html;
 }
 let RAW={};  // id -> raw text for copy buttons
+let FIGS=[]; // generated figures (with inline svg) for the download buttons
 function copyBtn(id,label){ return '<button class="copy" data-c="'+id+'">'+(label||"Copy")+'</button>'; }
 function renderResult(d){
   RAW={full:d.rewrittenDraft, schema:JSON.stringify(d.schemas,null,2)};
   const c=d.content||{}, m=c.metadata||{};
+  FIGS=c.imageSuggestions||[];
   const safe=d.safe, delta=d.optimizedScore-d.baselineScore, ds=(delta>=0?"+":"")+delta;
   const ms=(d.modelScore!==undefined)?d.modelScore:d.optimizedScore;
   const ed=d.editorial;
@@ -361,16 +363,20 @@ function renderResult(d){
   if((c.imageSuggestions||[]).length){
     h+='<div class="card full"><h3>Generated figures (inline SVG, machine-readable)</h3>'+
        '<p class="hint" style="margin:.2rem 0 .6rem">The source had no images, so these inline-SVG figures were generated and embedded in the optimized article (under their section) as &lt;figure&gt; blocks — visible here and in the copied Markdown, and parseable by search engines and AI (they carry a title, description, and alt text). Want a richer photographic graphic instead? Use each figure&rsquo;s generation prompt in your image tool and swap it in.</p>';
-    for(const s of c.imageSuggestions){
+    c.imageSuggestions.forEach((s,fi)=>{
       h+='<figure style="margin:1rem 0 1.3rem">'+
          '<div style="max-width:560px">'+(s.svg||"")+'</div>'+
-         '<figcaption class="hint" style="margin:.4rem 0 0">'+esc(s.caption)+'</figcaption>'+
-         '<div class="meta" style="margin-top:.5rem">'+
+         '<figcaption class="hint" style="margin:.4rem 0 .4rem">'+esc(s.caption)+'</figcaption>'+
+         '<div style="display:flex;gap:.5rem;margin:.2rem 0 .5rem">'+
+           '<button class="copy figdl" data-fig="'+fi+'" data-kind="png">Download PNG</button>'+
+           '<button class="copy figdl" data-fig="'+fi+'" data-kind="svg">Download SVG</button>'+
+         '</div>'+
+         '<div class="meta">'+
          '<div class="metarow"><span class="metak">Alt text</span><span class="metav">'+esc(s.alt)+'</span></div>'+
          '<div class="metarow"><span class="metak">Section</span><span class="metav">'+esc(s.section||"")+'</span></div>'+
          '<div class="metarow"><span class="metak">Generation prompt (for a richer graphic)</span><span class="metav">'+esc(s.prompt)+'</span></div>'+
          '</div></figure>';
-    }
+    });
     h+='</div>';
   }
   // Downloadable assets preserved from the source
@@ -442,11 +448,38 @@ function renderResult(d){
 }
 function metaRow(k,v){ return '<div class="metarow"><span class="metak">'+esc(k)+'</span><span class="metav">'+esc(v||"—")+'</span></div>'; }
 function bindCopies(){
-  document.querySelectorAll(".copy").forEach(b=>b.onclick=async()=>{
+  document.querySelectorAll(".copy:not(.figdl)").forEach(b=>b.onclick=async()=>{
     const key=b.dataset.c;
     const text=(RAW&&RAW[key]!==undefined)?RAW[key]:(($("#"+key)&&$("#"+key).textContent)||"");
     await navigator.clipboard.writeText(text);
     const o=b.textContent;b.textContent="Copied ✓";setTimeout(()=>b.textContent=o,1200);
+  });
+}
+function downloadBlob(blob,filename){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function svgToPng(svg,filename){
+  const W=820,H=460,scale=2;
+  const sized=svg.replace("<svg ","<svg width='"+W+"' height='"+H+"' ");
+  const url=URL.createObjectURL(new Blob([sized],{type:"image/svg+xml;charset=utf-8"}));
+  const img=new Image();
+  img.onload=function(){
+    const cv=document.createElement("canvas");cv.width=W*scale;cv.height=H*scale;
+    cv.getContext("2d").drawImage(img,0,0,W*scale,H*scale);
+    URL.revokeObjectURL(url);
+    cv.toBlob(function(b){ if(b) downloadBlob(b,filename); else alert("PNG export failed — use Download SVG."); },"image/png");
+  };
+  img.onerror=function(){ URL.revokeObjectURL(url); alert("PNG export failed — use Download SVG."); };
+  img.src=url;
+}
+function bindFigDownloads(){
+  document.querySelectorAll(".figdl").forEach(b=>b.onclick=()=>{
+    const f=FIGS[+b.dataset.fig]; if(!f||!f.svg)return;
+    if(b.dataset.kind==="svg") downloadBlob(new Blob([f.svg],{type:"image/svg+xml;charset=utf-8"}),"figure-"+(+b.dataset.fig+1)+".svg");
+    else svgToPng(f.svg,"figure-"+(+b.dataset.fig+1)+".png");
+    const o=b.textContent;b.textContent="Saved ✓";setTimeout(()=>b.textContent=o,1200);
   });
 }
 </script></body></html>`;
