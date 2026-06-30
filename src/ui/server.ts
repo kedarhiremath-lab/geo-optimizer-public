@@ -200,7 +200,6 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <div id="baseline"></div>
 <div id="interview"></div>
 <div id="out"></div>
-<div id="house"></div>
 </div>
 <script>
 const $=s=>document.querySelector(s);
@@ -210,8 +209,7 @@ function scoreColor(n){return n>=70?"var(--good)":n>=45?"var(--warn)":"var(--bad
 
 $("#analyze").onclick=doAnalyze;
 $("#url").addEventListener("keydown",e=>{if(e.key==="Enter")doAnalyze();});
-// House-style panel + saved-article viewer bootstrap
-loadHouseStyle();
+// Saved-article viewer bootstrap (/r/:id)
 const _view=location.pathname.match(/^\\/r\\/([a-f0-9]{16})$/);
 if(_view) bootView(_view[1]);
 
@@ -219,7 +217,7 @@ async function doAnalyze(){
   const url=$("#url").value.trim(); if(!url)return;
   CTX.url=url;
   $("#analyze").disabled=true; $("#status").className="status";
-  $("#status").innerHTML='<span class="spinner"></span>Rendering and scoring the post (no AI call yet)…';
+  $("#status").innerHTML='<span class="spinner"></span>Scoring the post and drafting suggested answers…';
   $("#baseline").innerHTML=""; $("#interview").innerHTML=""; $("#out").innerHTML="";
   try{
     const r=await fetch("/api/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url})});
@@ -228,10 +226,9 @@ async function doAnalyze(){
     CTX.provider=d.provider||"the configured model";
     $("#status").innerHTML="";
     $("#baseline").innerHTML=renderBaseline(d);
-    $("#interview").innerHTML=renderInterview(d.lenses);
+    $("#interview").innerHTML=renderInterview(d.lenses,d.suggestions||{});
     $("#gen").onclick=doOptimize;
     const skip=$("#gen-skip"); if(skip) skip.onclick=doOptimize;
-    fillSuggestions(CTX.url);
   }catch(e){$("#status").className="status err";$("#status").textContent=e.message;}
   finally{$("#analyze").disabled=false;}
 }
@@ -246,17 +243,18 @@ function renderBaseline(d){
   return h;
 }
 
-function renderInterview(lenses){
+function renderInterview(lenses,suggestions){
+  suggestions=suggestions||{};
   let h='<div class="step">Step 2 · Skills interview <span style="color:var(--accent);font-weight:600">(optional — but it makes the rewrite sharper)</span></div>';
   h+='<div class="card full"><p class="hint" style="margin:.1rem 0 1rem"><b>Optional.</b> You can skip this entirely and still get a full GEO-optimized article. Included is suggested answers to sharpen the GEO result, which you can edit and add to. Each section maps to a gstack expert lens.</p>'+
-     '<div style="margin:0 0 1rem;display:flex;gap:.7rem;align-items:center"><button id="gen-skip" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:.5rem 1rem;font-weight:600;border-radius:8px;cursor:pointer">Skip — optimize without answers</button><span id="sugstatus" class="hint"></span></div>';
+     '<div style="margin:0 0 1rem"><button id="gen-skip" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:.5rem 1rem;font-weight:600;border-radius:8px;cursor:pointer">Skip — optimize without answers</button></div>';
   for(const lens of lenses){
     h+='<div class="lens"><div class="lenshead"><span class="lensname">'+esc(lens.label)+
        '</span><span class="skilltag">/'+esc(lens.skill)+'</span></div>'+
        '<div class="lensintent">'+esc(lens.intent)+'</div>';
     for(const q of lens.questions){
       h+='<div class="q"><label for="'+q.id+'">'+esc(q.q)+'</label>'+
-         '<textarea id="'+q.id+'" placeholder="'+esc(q.placeholder)+'"></textarea></div>';
+         '<textarea id="'+q.id+'" placeholder="'+esc(q.placeholder)+'">'+esc(suggestions[q.id]||"")+'</textarea></div>';
     }
     h+='</div>';
   }
@@ -569,32 +567,8 @@ function bindFigDownloads(){
     const o=b.textContent;b.textContent="Saved ✓";setTimeout(()=>b.textContent=o,1200);
   });
 }
-async function fillSuggestions(url){
-  const st=$("#sugstatus"); if(st) st.textContent="Drafting suggested answers…";
-  try{
-    const r=await fetch("/api/suggest",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url})});
-    const d=await r.json(); const s=(d&&d.suggestions)||{}; let n=0;
-    for(const id in s){ const el=document.getElementById(id); if(el&&!el.value.trim()){ el.value=s[id]; n++; } }
-    if(st) st.textContent = n? "Suggested answers filled in — edit freely." : "";
-  }catch(e){ if(st) st.textContent=""; }
-}
-async function loadHouseStyle(){
-  try{ const r=await fetch("/api/learnings"); const d=await r.json(); renderHouse((d&&d.learnings)||[]); }catch(e){}
-}
-function renderHouse(list){
-  const el=$("#house"); if(!el)return;
-  let h='<div class="card full"><div class="codehead"><h3>House style — what the optimizer has learned</h3>'+
-    (list.length?'<button class="copy" id="house-clear">Clear all</button>':'')+'</div>'+
-    '<p class="hint" style="margin:.1rem 0 .5rem">Durable Trossen preferences applied to every future rewrite. Captured from your Hard-Requirements answers, or add your own rule.</p>';
-  h+= list.length ? ('<ul style="margin:.2rem 0 .7rem;padding-left:1.1rem">'+list.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>') : '<p class="hint" style="margin:.2rem 0 .7rem">Nothing learned yet — it fills in as you optimize.</p>';
-  h+='<div style="display:flex;gap:.5rem"><input id="house-add" placeholder="Add a rule, e.g. Always link Trossen SDK docs; confident not hypey" style="flex:1;padding:.6rem .7rem;border-radius:8px;border:1px solid #2a3447;background:#0f1622;color:#e8ebf0"/><button id="house-save" class="copy">Add</button></div></div>';
-  el.innerHTML=h;
-  const sv=$("#house-save"); if(sv) sv.onclick=async()=>{ const inp=$("#house-add"); const t=inp?inp.value.trim():""; if(!t)return; const r=await fetch("/api/learn",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:t})}); const d=await r.json(); renderHouse((d&&d.learnings)||[]); };
-  const cl=$("#house-clear"); if(cl) cl.onclick=async()=>{ if(!confirm("Clear all learned house style?"))return; const r=await fetch("/api/learn/clear",{method:"POST"}); const d=await r.json(); renderHouse((d&&d.learnings)||[]); };
-}
 async function bootView(id){
   const bar=$(".bar"); if(bar) bar.style.display="none";
-  const hp=$("#house"); if(hp) hp.style.display="none";
   $("#status").className="status"; $("#status").innerHTML='<span class="spinner"></span>Loading saved article…';
   try{
     const r=await fetch("/api/result/"+id); const d=await r.json();
@@ -657,12 +631,19 @@ app.post("/api/analyze", async (req, res) => {
   // Hard timeout: if the browser hangs, return a proper error rather than
   // dropping the connection (which gives the client "Unexpected end of JSON input").
   const timeout = setTimeout(() => {
-    if (!res.headersSent) res.status(504).json({ error: "Page render timed out (>90s). Try again or check the URL." });
-  }, 90_000);
+    if (!res.headersSent) res.status(504).json({ error: "Analyze timed out (>150s). Try again or check the URL." });
+  }, 150_000);
   try {
     const a = await analyze(url);
+    // #3: draft suggested interview answers now, so the interview renders pre-filled.
+    let suggestions: Record<string, string> = {};
+    try {
+      suggestions = await suggestInterviewAnswers(url, createProvider());
+    } catch {
+      /* non-fatal — interview just renders with empty (placeholder) fields */
+    }
     clearTimeout(timeout);
-    if (!res.headersSent) res.json({ ...a, lenses: INTERVIEW_LENSES, provider: providerLabel() });
+    if (!res.headersSent) res.json({ ...a, lenses: INTERVIEW_LENSES, provider: providerLabel(), suggestions });
   } catch (err) {
     clearTimeout(timeout);
     if (!res.headersSent) res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
