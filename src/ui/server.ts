@@ -3,18 +3,51 @@
 // Internal tool, runs locally (no auth, no hosting — out of scope for M1).
 
 import express from "express";
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { analyze, optimize } from "../optimize.js";
+import { analyze, optimize, suggestInterviewAnswers } from "../optimize.js";
 import { createProvider } from "../llm.js";
 import { INTERVIEW_LENSES } from "../interview.js";
+import { getLearnings, addLearnings, clearLearnings } from "../learnings.js";
 
-// Demo safety net: cache the last successful optimization per URL. If the live
-// quota is exhausted, we serve the cached result instead of a red error.
+// Article repository (#6): every optimization is stored, keyed by source URL, so
+// re-optimizing the same article OVERWRITES the previous version (latest only —
+// no duplicates). Doubles as the demo safety net (serve cached on quota error).
 const RESULT_CACHE = join(process.cwd(), "cache", "results");
+function resultIdFor(url: string): string {
+  return createHash("sha256").update(url).digest("hex").slice(0, 16);
+}
 function resultPath(url: string): string {
-  return join(RESULT_CACHE, createHash("sha256").update(url).digest("hex").slice(0, 16) + ".json");
+  return join(RESULT_CACHE, resultIdFor(url) + ".json");
+}
+function loadResultById(id: string): unknown | null {
+  try {
+    const p = join(RESULT_CACHE, id + ".json");
+    return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : null;
+  } catch {
+    return null;
+  }
+}
+interface RepoEntry { id: string; url: string; title: string; score: number; savedAt: number; }
+function listResults(): RepoEntry[] {
+  try {
+    if (!existsSync(RESULT_CACHE)) return [];
+    return readdirSync(RESULT_CACHE)
+      .filter((f) => f.endsWith(".json"))
+      .map((f): RepoEntry | null => {
+        try {
+          const r = JSON.parse(readFileSync(join(RESULT_CACHE, f), "utf8"));
+          return { id: f.replace(/\.json$/, ""), url: r.url || "", title: r.title || r.url || "Untitled", score: r.optimizedScore ?? 0, savedAt: statSync(join(RESULT_CACHE, f)).mtimeMs };
+        } catch {
+          return null;
+        }
+      })
+      .filter((x): x is RepoEntry => x !== null)
+      .sort((a, b) => b.savedAt - a.savedAt);
+  } catch {
+    return [];
+  }
 }
 function saveResult(url: string, result: unknown): void {
   try {
@@ -157,7 +190,7 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 </style></head><body><div class="wrap">
 <header>
  <h1>Trossen GEO/SEO Optimizer</h1>
- <p>Score a post, answer a short skills interview, get an optimized draft tuned to your answers.</p>
+ <p>Score a post, answer a short skills interview, get an optimized draft tuned to your answers. <a href="/dashboard" style="color:var(--accent)">Saved articles →</a></p>
 </header>
 <div class="bar">
  <input id="url" placeholder="https://www.trossenrobotics.com/post/…"/>
@@ -167,6 +200,7 @@ const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <div id="baseline"></div>
 <div id="interview"></div>
 <div id="out"></div>
+<div id="house"></div>
 </div>
 <script>
 const $=s=>document.querySelector(s);
@@ -176,6 +210,10 @@ function scoreColor(n){return n>=70?"var(--good)":n>=45?"var(--warn)":"var(--bad
 
 $("#analyze").onclick=doAnalyze;
 $("#url").addEventListener("keydown",e=>{if(e.key==="Enter")doAnalyze();});
+// House-style panel + saved-article viewer bootstrap
+loadHouseStyle();
+const _view=location.pathname.match(/^\\/r\\/([a-f0-9]{16})$/);
+if(_view) bootView(_view[1]);
 
 async function doAnalyze(){
   const url=$("#url").value.trim(); if(!url)return;
@@ -193,6 +231,7 @@ async function doAnalyze(){
     $("#interview").innerHTML=renderInterview(d.lenses);
     $("#gen").onclick=doOptimize;
     const skip=$("#gen-skip"); if(skip) skip.onclick=doOptimize;
+    fillSuggestions(CTX.url);
   }catch(e){$("#status").className="status err";$("#status").textContent=e.message;}
   finally{$("#analyze").disabled=false;}
 }
@@ -209,8 +248,8 @@ function renderBaseline(d){
 
 function renderInterview(lenses){
   let h='<div class="step">Step 2 · Skills interview <span style="color:var(--accent);font-weight:600">(optional — but it makes the rewrite sharper)</span></div>';
-  h+='<div class="card full"><p class="hint" style="margin:.1rem 0 1rem"><b>Optional.</b> You can skip this entirely and still get a full GEO-optimized article. But every answer you give sharpens the result: it is how your intent, your audience, and the CEO-review angle get woven into the rewrite. Two minutes here noticeably improves the output — blanks are simply skipped. Each section maps to a gstack expert lens.</p>'+
-     '<div style="margin:0 0 1rem"><button id="gen-skip" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:.5rem 1rem;font-weight:600;border-radius:8px;cursor:pointer">Skip — optimize without answers</button></div>';
+  h+='<div class="card full"><p class="hint" style="margin:.1rem 0 1rem"><b>Optional.</b> You can skip this entirely and still get a full GEO-optimized article. Included is suggested answers to sharpen the GEO result, which you can edit and add to. Each section maps to a gstack expert lens.</p>'+
+     '<div style="margin:0 0 1rem;display:flex;gap:.7rem;align-items:center"><button id="gen-skip" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:.5rem 1rem;font-weight:600;border-radius:8px;cursor:pointer">Skip — optimize without answers</button><span id="sugstatus" class="hint"></span></div>';
   for(const lens of lenses){
     h+='<div class="lens"><div class="lenshead"><span class="lensname">'+esc(lens.label)+
        '</span><span class="skilltag">/'+esc(lens.skill)+'</span></div>'+
@@ -310,6 +349,12 @@ function renderResult(d){
      '<div class="badge '+(safe?"ok":"no")+'">'+(safe?"✓ safe to use":"⚠ needs review")+'</div></div>';
   h+='<div class="card"><h3>Fixes applied</h3><ol class="fixes">'+
      d.fixList.map(f=>'<li><b>'+esc(f.label)+'</b></li>').join('')+'</ol></div></div>';
+  // Shareable permalink (saved to the repository; latest version of this URL)
+  if(d.savedUrl){
+    h+='<div class="card full"><div class="codehead"><h3>Shareable link (saved to repository)</h3>'+copyBtn("perma","Copy link")+'</div>'+
+       '<p class="hint" style="margin:.1rem 0 .4rem">Re-optimizing this same URL overwrites this saved version (latest only). <a href="/dashboard" style="color:var(--accent)">View all saved →</a></p>'+
+       '<div><a id="perma" href="'+esc(d.savedUrl)+'" target="_blank" rel="noopener">'+esc(location.origin+d.savedUrl)+'</a></div></div>';
+  }
   // Editorial Preservation Mode — publish-readiness banner
   if(ed){
     if(!ed.publishReady){
@@ -524,6 +569,41 @@ function bindFigDownloads(){
     const o=b.textContent;b.textContent="Saved ✓";setTimeout(()=>b.textContent=o,1200);
   });
 }
+async function fillSuggestions(url){
+  const st=$("#sugstatus"); if(st) st.textContent="Drafting suggested answers…";
+  try{
+    const r=await fetch("/api/suggest",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url})});
+    const d=await r.json(); const s=(d&&d.suggestions)||{}; let n=0;
+    for(const id in s){ const el=document.getElementById(id); if(el&&!el.value.trim()){ el.value=s[id]; n++; } }
+    if(st) st.textContent = n? "Suggested answers filled in — edit freely." : "";
+  }catch(e){ if(st) st.textContent=""; }
+}
+async function loadHouseStyle(){
+  try{ const r=await fetch("/api/learnings"); const d=await r.json(); renderHouse((d&&d.learnings)||[]); }catch(e){}
+}
+function renderHouse(list){
+  const el=$("#house"); if(!el)return;
+  let h='<div class="card full"><div class="codehead"><h3>House style — what the optimizer has learned</h3>'+
+    (list.length?'<button class="copy" id="house-clear">Clear all</button>':'')+'</div>'+
+    '<p class="hint" style="margin:.1rem 0 .5rem">Durable Trossen preferences applied to every future rewrite. Captured from your Hard-Requirements answers, or add your own rule.</p>';
+  h+= list.length ? ('<ul style="margin:.2rem 0 .7rem;padding-left:1.1rem">'+list.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>') : '<p class="hint" style="margin:.2rem 0 .7rem">Nothing learned yet — it fills in as you optimize.</p>';
+  h+='<div style="display:flex;gap:.5rem"><input id="house-add" placeholder="Add a rule, e.g. Always link Trossen SDK docs; confident not hypey" style="flex:1;padding:.6rem .7rem;border-radius:8px;border:1px solid #2a3447;background:#0f1622;color:#e8ebf0"/><button id="house-save" class="copy">Add</button></div></div>';
+  el.innerHTML=h;
+  const sv=$("#house-save"); if(sv) sv.onclick=async()=>{ const inp=$("#house-add"); const t=inp?inp.value.trim():""; if(!t)return; const r=await fetch("/api/learn",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:t})}); const d=await r.json(); renderHouse((d&&d.learnings)||[]); };
+  const cl=$("#house-clear"); if(cl) cl.onclick=async()=>{ if(!confirm("Clear all learned house style?"))return; const r=await fetch("/api/learn/clear",{method:"POST"}); const d=await r.json(); renderHouse((d&&d.learnings)||[]); };
+}
+async function bootView(id){
+  const bar=$(".bar"); if(bar) bar.style.display="none";
+  const hp=$("#house"); if(hp) hp.style.display="none";
+  $("#status").className="status"; $("#status").innerHTML='<span class="spinner"></span>Loading saved article…';
+  try{
+    const r=await fetch("/api/result/"+id); const d=await r.json();
+    if(!r.ok||d.error) throw new Error(d.error||"Not found");
+    $("#status").innerHTML="";
+    $("#out").innerHTML='<div class="step">Saved optimized article</div>'+renderResult(d);
+    bindCopies(); bindFigDownloads(); bindWixCopy(); bindSeoRecs();
+  }catch(e){ $("#status").className="status err"; $("#status").textContent="Could not load saved article: "+e.message; }
+}
 </script></body></html>`;
 
 app.get("/", (_req, res) => res.type("html").send(PAGE));
@@ -602,8 +682,8 @@ app.post("/api/optimize", async (req, res) => {
   try {
     const result = await optimize(url, createProvider(), { answers });
     clearTimeout(timeout);
-    saveResult(url, result); // cache the latest good result for the demo safety net
-    if (!res.headersSent) res.json(result);
+    saveResult(url, result); // store in the repository (overwrites the prior version of this URL)
+    if (!res.headersSent) res.json({ ...result, savedUrl: "/r/" + resultIdFor(url) });
   } catch (err) {
     clearTimeout(timeout);
     const raw = err instanceof Error ? err.message : String(err);
@@ -611,13 +691,76 @@ app.post("/api/optimize", async (req, res) => {
     if (/429|quota|rate.?limit|resource.?exhausted|overloaded|529|credit balance|billing|all gemini models failed/i.test(raw)) {
       const cached = loadResult(url) as Record<string, unknown> | null;
       if (cached) {
-        if (!res.headersSent) res.json({ ...cached, servedFromCache: true });
+        if (!res.headersSent) res.json({ ...cached, servedFromCache: true, savedUrl: "/r/" + resultIdFor(url) });
         return;
       }
     }
     if (!res.headersSent) res.status(500).json({ error: quotaMessage(raw) });
   }
 });
+
+// #3 — pre-fill the skills interview with AI-suggested answers (one LLM call).
+app.post("/api/suggest", async (req, res) => {
+  const url = (req.body?.url ?? "").toString().trim();
+  if (badUrl(url)) {
+    res.status(400).json({ error: "Provide a valid http(s) URL." });
+    return;
+  }
+  try {
+    const suggestions = await suggestInterviewAnswers(url, createProvider());
+    res.json({ suggestions });
+  } catch {
+    res.json({ suggestions: {} }); // non-fatal — interview just stays blank
+  }
+});
+
+// #7 — house-style learnings (view / add / clear).
+app.get("/api/learnings", (_req, res) => res.json({ learnings: getLearnings() }));
+app.post("/api/learn", (req, res) => {
+  const text = (req.body?.text ?? "").toString().trim();
+  res.json({ learnings: text ? addLearnings([text]) : getLearnings() });
+});
+app.post("/api/learn/clear", (_req, res) => {
+  clearLearnings();
+  res.json({ learnings: [] });
+});
+
+// #6 — article repository: fetch a stored result, view it, and the dashboard.
+app.get("/api/result/:id", (req, res) => {
+  const id = req.params.id;
+  if (!/^[a-f0-9]{16}$/.test(id)) {
+    res.status(400).json({ error: "bad id" });
+    return;
+  }
+  const r = loadResultById(id);
+  if (!r) {
+    res.status(404).json({ error: "Not found — it may have been overwritten or the server restarted." });
+    return;
+  }
+  res.json({ ...(r as Record<string, unknown>), savedUrl: "/r/" + id });
+});
+app.get("/r/:id", (_req, res) => res.type("html").send(PAGE)); // client bootstraps via /api/result/:id
+app.get("/dashboard", (_req, res) => res.type("html").send(renderDashboard()));
+
+function renderDashboard(): string {
+  const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+  const rows = listResults();
+  const body = rows.length
+    ? rows
+        .map(
+          (r) =>
+            `<tr><td><a href="/r/${r.id}">${esc(r.title)}</a></td><td class="sc" style="color:${r.score >= 70 ? "#39d98a" : r.score >= 45 ? "#e0b341" : "#ff6b6b"}">${r.score}</td><td>${new Date(r.savedAt).toLocaleString()}</td><td><a href="${esc(r.url)}" target="_blank" rel="noopener">source</a></td></tr>`,
+        )
+        .join("")
+    : '<tr><td colspan="4" style="color:#9aa6bb">No optimized articles yet. Optimize one, then it appears here.</td></tr>';
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GEO Optimizer — Saved Articles</title>
+<style>body{background:#0b0f17;color:#e8ebf0;font-family:system-ui,Segoe UI,Arial;max-width:1000px;margin:0 auto;padding:2rem}
+a{color:#4f8cff;text-decoration:none}a:hover{text-decoration:underline}h1{font-size:1.5rem}
+table{width:100%;border-collapse:collapse;margin-top:1rem}th,td{text-align:left;padding:.6rem .5rem;border-bottom:1px solid #1c2433}
+th{color:#9aa6bb;font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}.sc{font-weight:700}</style></head>
+<body><h1>Saved GEO-optimized articles</h1><p style="color:#9aa6bb">Latest version of each article (re-optimizing overwrites the older one). <a href="/">← Back to optimizer</a></p>
+<table><thead><tr><th>Title</th><th>Score</th><th>Saved</th><th>Original</th></tr></thead><tbody>${body}</tbody></table></body></html>`;
+}
 
 // Prevent unhandled promise rejections / uncaught exceptions from silently
 // killing the process mid-request (which gives the client an empty body /

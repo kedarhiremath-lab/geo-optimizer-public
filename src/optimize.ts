@@ -8,10 +8,11 @@ import { scoreOriginal, buildFixList, scoreOptimized, topicOverlap, countStats, 
 import { computeReadability, editorialChangeBudget, evaluateEditorialGates, dedupeTitle, splitDenseParagraphs } from "./editorial.js";
 import { traceInterview } from "./trace.js";
 import { pickFigures, insertFigures, ensureDownloadsSection, ensureSourcesSection, figureSvg } from "./assets.js";
-import { articleBodyPrompt, structuredMetaPrompt } from "./prompts.js";
+import { articleBodyPrompt, structuredMetaPrompt, interviewSuggestionsPrompt } from "./prompts.js";
 import { claimDiff } from "./claimDiff.js";
 import { buildSchemas } from "./schema.js";
-import { parseOptimizedMeta, assembleContent, composeArticle } from "./content.js";
+import { parseOptimizedMeta, assembleContent, composeArticle, extractJson } from "./content.js";
+import { addLearnings } from "./learnings.js";
 import { deriveConfig } from "./config.js";
 import type { LlmProvider, OptimizeResult, OptimizerConfig, OptimizedContent, Article } from "./types.js";
 import type { InterviewAnswers } from "./interview.js";
@@ -42,6 +43,28 @@ export async function analyze(url: string, opts: OptimizeOptions = {}): Promise<
   const config = opts.config ?? deriveConfig(article);
   const scored = scoreOriginal(article, config);
   return { url, title: article.title, baselineScore: scored.baselineScore, fixList: buildFixList(scored) };
+}
+
+/**
+ * Pre-fill the skills interview (feedback #3): one LLM call drafts a suggested
+ * answer for every interview question from the article. Returns {questionId: answer}.
+ */
+export async function suggestInterviewAnswers(
+  url: string,
+  provider: LlmProvider,
+  opts: OptimizeOptions = {},
+): Promise<Record<string, string>> {
+  const page = await fetchRendered(url, opts);
+  const article = extractArticle(page);
+  const raw = await provider.complete(interviewSuggestionsPrompt(article), { json: true });
+  try {
+    const obj = extractJson(raw) as Record<string, unknown>;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(obj)) if (typeof v === "string" && v.trim()) out[k] = v.trim();
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 /** Strip a leading/trailing ```markdown or ``` fence if the model wrapped the body. */
@@ -349,6 +372,17 @@ export async function optimize(
     shortCount: content.shortVersion.length,
   });
   const interviewTrace = traceInterview(opts.answers, publishArticle);
+
+  // Learn from this run (#7): persist the GENERAL house-style answers (tone,
+  // standard CTA/links, target keywords) so future rewrites apply them. Per-article
+  // answers (audience, thesis) are NOT captured — they're specific to this post.
+  if (opts.answers) {
+    const cap: string[] = [];
+    if (opts.answers.spec_constraints) cap.push(`Tone & constraints to honor: ${opts.answers.spec_constraints}`);
+    if (opts.answers.spec_cta) cap.push(`Standard CTA / links to include: ${opts.answers.spec_cta}`);
+    if (opts.answers.spec_keywords) cap.push(`Target keywords to win on: ${opts.answers.spec_keywords}`);
+    if (cap.length) addLearnings(cap);
+  }
 
   return {
     url,

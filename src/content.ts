@@ -4,7 +4,7 @@
 
 import type { OptimizedContent, FaqItem, Metadata, ImageSuggestion } from "./types.js";
 
-function extractJson(raw: string): unknown {
+export function extractJson(raw: string): unknown {
   const trimmed = raw.trim();
   // Strip ```json fences if present.
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);

@@ -3,7 +3,8 @@
 // eval harness in eval/run.ts guards against it).
 
 import type { Article, FixItem, OptimizerConfig } from "./types.js";
-import { formatAnswers, type InterviewAnswers } from "./interview.js";
+import { formatAnswers, INTERVIEW_LENSES, type InterviewAnswers } from "./interview.js";
+import { learningsBlock } from "./learnings.js";
 
 /**
  * Rewrite prompt. The fact-preservation constraint is the reputational
@@ -137,8 +138,34 @@ export function articleBodyPrompt(
     "",
     directionBlock(answers),
     "",
+    learningsBlock(),
+    "",
     "---",
     "SOURCE ARTICLE (preserve this author's voice and wording):",
+    article.content,
+  ].join("\n");
+}
+
+/**
+ * Pre-fill the skills interview (feedback #3): draft a concise suggested answer
+ * for every interview question, grounded only in the article, so the user edits
+ * instead of writing from scratch. Returns JSON {questionId: answer}.
+ */
+export function interviewSuggestionsPrompt(article: Article): string {
+  const lines = INTERVIEW_LENSES.flatMap((l) => l.questions.map((q) => `- ${q.id}: ${q.q}`));
+  return [
+    "Pre-fill a short editorial interview about the SOURCE ARTICLE below. For each",
+    "question id, draft a concise, specific suggested answer (ONE sentence, <= 160",
+    "characters) grounded ONLY in the article. These are starting points the user edits —",
+    "be concrete and useful, never generic. Do not invent facts not in the article.",
+    "",
+    "QUESTIONS (id: question):",
+    ...lines,
+    "",
+    "Return ONLY a JSON object mapping each id to its suggested answer string. No prose, no markdown.",
+    "",
+    "---",
+    "SOURCE ARTICLE:",
     article.content,
   ].join("\n");
 }
