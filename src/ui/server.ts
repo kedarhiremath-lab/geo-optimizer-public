@@ -192,6 +192,7 @@ async function doAnalyze(){
     $("#baseline").innerHTML=renderBaseline(d);
     $("#interview").innerHTML=renderInterview(d.lenses);
     $("#gen").onclick=doOptimize;
+    const skip=$("#gen-skip"); if(skip) skip.onclick=doOptimize;
   }catch(e){$("#status").className="status err";$("#status").textContent=e.message;}
   finally{$("#analyze").disabled=false;}
 }
@@ -207,8 +208,9 @@ function renderBaseline(d){
 }
 
 function renderInterview(lenses){
-  let h='<div class="step">Step 2 · Skills interview</div>';
-  h+='<div class="card full"><p class="hint" style="margin:.1rem 0 1rem">Answer what you can — blanks are skipped. Each section is a gstack skill lens. Your answers steer the rewrite.</p>';
+  let h='<div class="step">Step 2 · Skills interview <span style="color:var(--accent);font-weight:600">(optional — but it makes the rewrite sharper)</span></div>';
+  h+='<div class="card full"><p class="hint" style="margin:.1rem 0 1rem"><b>Optional.</b> You can skip this entirely and still get a full GEO-optimized article. But every answer you give sharpens the result: it is how your intent, your audience, and the CEO-review angle get woven into the rewrite. Two minutes here noticeably improves the output — blanks are simply skipped. Each section maps to a gstack expert lens.</p>'+
+     '<div style="margin:0 0 1rem"><button id="gen-skip" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:.5rem 1rem;font-weight:600;border-radius:8px;cursor:pointer">Skip — optimize without answers</button></div>';
   for(const lens of lenses){
     h+='<div class="lens"><div class="lenshead"><span class="lensname">'+esc(lens.label)+
        '</span><span class="skilltag">/'+esc(lens.skill)+'</span></div>'+
@@ -354,6 +356,26 @@ function renderResult(d){
          '<p class="hint" style="margin:.2rem 0 .6rem">Apply these in your CMS metadata if you want; they were intentionally kept OUT of the article body.</p>'+
          '<div class="prose"><ul>'+ed.optionalSeoRecs.map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul></div></div>';
     }
+  }
+  // Recommended figures (machine-readable) — only when the source had no images
+  if((c.imageSuggestions||[]).length){
+    h+='<div class="card full"><h3>Recommended figures (machine-readable)</h3>'+
+       '<p class="hint" style="margin:.2rem 0 .6rem">The source article had no images, so these were added to the optimized article as &lt;figure&gt; blocks with alt text and captions (which search engines and AI parse). Generate each graphic from its prompt, or drop in a branded visual.</p>';
+    for(const s of c.imageSuggestions){
+      h+='<div style="margin:.6rem 0;border-left:3px solid var(--line);padding-left:.7rem">'+
+         '<div><b>'+esc(s.section||"Figure")+'</b></div><div class="meta">'+
+         '<div class="metarow"><span class="metak">Alt text</span><span class="metav">'+esc(s.alt)+'</span></div>'+
+         '<div class="metarow"><span class="metak">Caption</span><span class="metav">'+esc(s.caption)+'</span></div>'+
+         '<div class="metarow"><span class="metak">Generation prompt</span><span class="metav">'+esc(s.prompt)+'</span></div>'+
+         '</div></div>';
+    }
+    h+='</div>';
+  }
+  // Downloadable assets preserved from the source
+  if((d.sourceDownloads||[]).length){
+    h+='<div class="card full"><h3>Downloadable assets preserved</h3>'+
+       '<p class="hint" style="margin:.2rem 0 .6rem">Carried over from the original article into a Downloads section of the optimized draft. Consider gating the most valuable one as a lead-capture conversion asset.</p>'+
+       '<div class="prose"><ul>'+d.sourceDownloads.map(u=>'<li><a href="'+esc(u)+'" target="_blank" rel="noopener">'+esc(u)+'</a></li>').join('')+'</ul></div></div>';
   }
   // Score explainer — what the number measures + highest-leverage changes
   if(d.scoreExplain){

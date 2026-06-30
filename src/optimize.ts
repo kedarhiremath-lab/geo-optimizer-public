@@ -7,6 +7,7 @@ import { extractArticle } from "./extract.js";
 import { scoreOriginal, buildFixList, scoreOptimized, topicOverlap, countStats, explainScore, articleFromMarkdown } from "./score.js";
 import { computeReadability, editorialChangeBudget, evaluateEditorialGates, dedupeTitle, splitDenseParagraphs } from "./editorial.js";
 import { traceInterview } from "./trace.js";
+import { pickFigures, insertFigures, ensureDownloadsSection, ensureSourcesSection } from "./assets.js";
 import { articleBodyPrompt, structuredMetaPrompt } from "./prompts.js";
 import { claimDiff } from "./claimDiff.js";
 import { buildSchemas } from "./schema.js";
@@ -182,7 +183,7 @@ export function guaranteeRubric(body: string, content: OptimizedContent, article
         return `| ${i + 1} | ${head.trim().slice(0, 60)} | ${action.slice(0, 80)} |`;
       })
       .join("\n");
-    md += `\n\n## Deployment readiness at a glance\n\n| # | Step | What it means |\n|---|---|---|\n${rows}`;
+    md += `\n\n## Deployment readiness at a glance\n\n_Table: a machine-readable summary of the key steps from this article — parseable by search engines and AI answer engines (replaces any scorecard graphic)._\n\n| # | Step | What it means |\n|---|---|---|\n${rows}`;
   }
   return md;
 }
@@ -249,6 +250,36 @@ export async function optimize(
   const deduped = dedupeTitle(composed, article.title);
   const fullArticle = deduped.md;
 
+  // Visual + downloadable assets (#1, #3). If the source has no images, generate
+  // 2 machine-readable figures for the first sections; always preserve any
+  // downloadable assets from the source. Done on a COPY so it never skews scoring
+  // or the claim-diff (which run on the prose).
+  const hasSourceImages = (article.images?.length ?? 0) > 0;
+  const figures = hasSourceImages ? [] : pickFigures(content.imageSuggestions ?? [], article.headings, 2, 4);
+  content.imageSuggestions = figures; // surface the placed figures in the UI
+  let publishArticle = insertFigures(fullArticle, figures);
+  publishArticle = ensureDownloadsSection(publishArticle, article.downloads ?? []);
+  // Preserve the original article's external citations (its "Sources" section).
+  const externalLinks = article.links.filter((l) => !/trossenrobotics\.com/i.test(l));
+  publishArticle = ensureSourcesSection(publishArticle, externalLinks);
+
+  // Deterministic asset recommendations (#1/#3/#9), prepended to the model's.
+  const assetRecs: string[] = [];
+  assetRecs.push(
+    "Convert any chart or scorecard graphic into the machine-readable HTML comparison table (with a descriptive caption) so search engines and AI can parse it.",
+  );
+  if (hasSourceImages) {
+    assetRecs.push(`Source has ${article.images!.length} image(s) — add descriptive alt text to each and convert any data-bearing visual (scorecard, chart) into an HTML table.`);
+  } else if (figures.length) {
+    assetRecs.push(`No images in the source — ${figures.length} machine-readable figures were generated below (alt text + caption + a ready-to-use generation prompt). Replace the placeholders with branded graphics.`);
+  }
+  if ((article.downloads?.length ?? 0) > 0) {
+    assetRecs.push(`Preserved ${article.downloads!.length} downloadable asset(s) from the source — gate the most valuable one as a lead-capture conversion asset (email for download) for backlinks + sales enablement.`);
+  } else {
+    assetRecs.push("Offer a downloadable version (e.g. a one-page PDF checklist) as a gated conversion asset for lead capture and backlinks.");
+  }
+  content.assetRecommendations = [...assetRecs, ...content.assetRecommendations];
+
   const diff = await claimDiff(provider, article.text, fullArticle);
   const { schemas, notes, articleValid } = buildSchemas(article, content);
   const optimizedScore = scoreOptimized(fullArticle, scoredBase, config, {
@@ -282,7 +313,7 @@ export async function optimize(
     origBody: article.content,
     optBody: content.articleMarkdown,
     origHeadings: article.headings,
-    published: fullArticle,
+    published: publishArticle,
     title: article.title,
     before,
     after,
@@ -315,7 +346,7 @@ export async function optimize(
     whoCount: content.whoThisIsFor.length,
     shortCount: content.shortVersion.length,
   });
-  const interviewTrace = traceInterview(opts.answers, fullArticle);
+  const interviewTrace = traceInterview(opts.answers, publishArticle);
 
   return {
     url,
@@ -324,7 +355,7 @@ export async function optimize(
     modelScore,
     optimizedScore,
     fixList,
-    rewrittenDraft: fullArticle,
+    rewrittenDraft: publishArticle,
     content,
     schemas,
     schemaNotes: notes,
@@ -333,5 +364,6 @@ export async function optimize(
     editorial,
     scoreExplain,
     interviewTrace,
+    sourceDownloads: article.downloads ?? [],
   };
 }

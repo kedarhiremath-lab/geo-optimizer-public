@@ -14,7 +14,7 @@ async function main() {
   const a = extractArticle(page);
   console.log("title:", a.title);
   console.log("headings:", a.headings.length, "| links:", a.links.length, "| existing JSON-LD:", a.existingJsonLd.length);
-  a.headings.forEach((h, i) => console.log(`  [${i}] ${JSON.stringify(h)}`));
+  console.log("images:", (a.images ?? []).length, "| downloads:", (a.downloads ?? []).length);
   console.log("body words:", a.text.split(/\s+/).length);
   const scored = scoreOriginal(a, deriveConfig(a));
   console.log("baseline score:", scored.baselineScore + "/100");

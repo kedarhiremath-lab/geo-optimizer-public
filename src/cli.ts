@@ -51,6 +51,9 @@ async function main(): Promise<void> {
     if (se.sourceLimited.length) console.log(`Source-limited: ${se.sourceLimited.join(", ")}`);
   }
 
+  console.log(`\n--- Assets ---`);
+  console.log(`Figures generated: ${r.content.imageSuggestions?.length ?? 0} | downloads preserved: ${r.sourceDownloads.length} | rewrite has <figure>: ${/<figure>/.test(r.rewrittenDraft)} | has Sources section: ${/##\s+Sources/i.test(r.rewrittenDraft)}`);
+
   console.log(`\n--- Prioritized fix-list ---`);
   r.fixList.forEach((f, i) => console.log(`${i + 1}. [p${f.priority}] ${f.label}: ${f.recommendation}`));
 

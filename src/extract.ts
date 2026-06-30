@@ -61,9 +61,32 @@ export function extractArticle(page: RenderedPage): Article {
     .map((h) => h.textContent?.trim() ?? "")
     .filter(Boolean)
     .filter((h) => !isChrome(h));
-  const links = Array.from(articleRoot?.querySelectorAll("a[href]") ?? [])
+  const anchors = Array.from(articleRoot?.querySelectorAll("a[href]") ?? []);
+  const links = anchors
     .map((a) => a.getAttribute("href") ?? "")
     .filter((h) => h.startsWith("http"));
+
+  // Content images (exclude inline data: URIs, which are usually icons/spacers).
+  const images = Array.from(articleRoot?.querySelectorAll("img") ?? [])
+    .map((img) => img.getAttribute("src") || img.getAttribute("data-src") || "")
+    .filter((src) => src && !src.startsWith("data:"));
+
+  // Downloadable assets: file-type links, anchors with a download attribute, or
+  // links to common document hosts (Wix file components, Google Docs/Drive,
+  // Dropbox) — these are the "below Sources" downloadables that have no clean
+  // file extension in the URL.
+  const DOWNLOAD_RE = /\.(pdf|docx?|xlsx?|pptx?|zip|csv|key|pages|numbers|txt|json)(\?|#|$)/i;
+  const DOWNLOAD_HOST = /(usrfiles\.com|wixstatic\.com\/(ugd|media)|\/ugd\/|drive\.google\.com|docs\.google\.com|dropbox\.com|\/download)/i;
+  const downloads = Array.from(
+    new Set(
+      anchors
+        .filter((a) => {
+          const href = a.getAttribute("href") ?? "";
+          return href.startsWith("http") && (DOWNLOAD_RE.test(href) || DOWNLOAD_HOST.test(href) || a.hasAttribute("download"));
+        })
+        .map((a) => a.getAttribute("href") ?? ""),
+    ),
+  );
 
   // Build the article content from the rendered DOM (chrome-stripped). This is
   // the actual content the rest of the pipeline uses — so the fidelity guards
@@ -95,6 +118,8 @@ export function extractArticle(page: RenderedPage): Article {
     meta,
     byline: readabilityByline,
     publishedTime: readabilityPublished,
+    images: Array.from(new Set(images)),
+    downloads,
   };
 }
 

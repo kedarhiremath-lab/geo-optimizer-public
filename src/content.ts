@@ -2,7 +2,7 @@
 // publishable article from its parts. Robust to the model wrapping JSON in
 // fences or returning partial objects (we fill safe defaults).
 
-import type { OptimizedContent, FaqItem, Metadata } from "./types.js";
+import type { OptimizedContent, FaqItem, Metadata, ImageSuggestion } from "./types.js";
 
 function extractJson(raw: string): unknown {
   const trimmed = raw.trim();
@@ -61,7 +61,23 @@ export function parseOptimizedMeta(raw: string): OptimizedMeta {
     faq: asFaq(obj.faq),
     metadata: asMetadata(obj.metadata),
     assetRecommendations: asStringArray(obj.assetRecommendations),
+    imageSuggestions: asImageSuggestions(obj.imageSuggestions),
   };
+}
+
+function asImageSuggestions(v: unknown): ImageSuggestion[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((e) => {
+      const o = (e ?? {}) as Record<string, unknown>;
+      return {
+        section: typeof o.section === "string" ? o.section : "",
+        alt: typeof o.alt === "string" ? o.alt : "",
+        caption: typeof o.caption === "string" ? o.caption : "",
+        prompt: typeof o.prompt === "string" ? o.prompt : "",
+      };
+    })
+    .filter((s) => s.alt.trim() && s.caption.trim());
 }
 
 /** Combine the separately-generated article body with the structured meta. */

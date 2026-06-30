@@ -30,6 +30,18 @@ export interface Article {
   meta: { title?: string; description?: string };
   byline?: string;
   publishedTime?: string;
+  /** Image src URLs found in the article body (data: URIs excluded). */
+  images?: string[];
+  /** Downloadable asset links from the source (PDF/DOCX/PPTX/ZIP/… or download attr). */
+  downloads?: string[];
+}
+
+/** A recommended machine-readable figure for a section that has no image. */
+export interface ImageSuggestion {
+  section: string; // the subtitle this figure sits under
+  alt: string; // machine-readable alt text (what the figure shows)
+  caption: string; // visible figcaption
+  prompt: string; // ready-to-use image-generation prompt to produce the actual graphic
 }
 
 /** A single checklist dimension and how the original post scored on it. */
@@ -88,6 +100,7 @@ export interface OptimizedContent {
   faq: FaqItem[]; // #7 structured FAQ
   metadata: Metadata; // #6
   assetRecommendations: string[]; // #5/#9 visual->HTML + downloadable asset recs
+  imageSuggestions?: ImageSuggestion[]; // #5 machine-readable figures for image-less sections
 }
 
 /** Editorial Preservation Mode — deterministic readability metrics (lower = easier). */
@@ -198,6 +211,8 @@ export interface OptimizeResult {
   scoreExplain: ScoreExplanation;
   /** Traceability of the skills-interview answers (incl. the CEO review lens). */
   interviewTrace: InterviewTraceLens[];
+  /** Downloadable assets carried over from the source article (preserved in the rewrite). */
+  sourceDownloads: string[];
 }
 
 /** Frozen prompt set + checklist config (defaults in config.ts). */
