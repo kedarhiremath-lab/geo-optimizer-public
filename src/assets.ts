@@ -14,14 +14,102 @@ const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").re
 const escAttr = (s: string) => escHtml(s).replace(/"/g, "&quot;");
 const normH = (h: string) => h.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
-/** A machine-readable HTML figure: parseable alt text + visible caption. */
-export function figureBlock(s: ImageSuggestion): string {
+const cap1 = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+/** Word-wrap text into <= maxChars lines. */
+function wrapText(text: string, maxChars: number): string[] {
+  const words = (text || "").split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    if ((cur + " " + w).trim().length > maxChars) {
+      if (cur) lines.push(cur);
+      cur = w;
+    } else cur = (cur + " " + w).trim();
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+const KW_STOP = new Set([
+  "about", "above", "after", "again", "their", "there", "these", "those", "which", "while",
+  "would", "could", "should", "where", "every", "into", "from", "with", "that", "this",
+  "your", "what", "when", "they", "them", "than", "then", "shift", "diagram", "figure",
+  "shows", "showing", "illustrating", "illustrates", "section", "article", "robotics",
+]);
+
+/** Up to 3 short keyword labels derived from the figure's alt + caption. */
+function figureKeywords(s: ImageSuggestion): string[] {
+  const words = `${s.alt} ${s.caption}`
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 4 && !KW_STOP.has(w));
+  return [...new Set(words)].slice(0, 3);
+}
+
+/**
+ * Render a clean, self-contained inline SVG figure derived from the section
+ * subtitle + caption. Real, visible, and machine-readable (it carries <title>,
+ * <desc>, and aria-label that search engines and AI parse) — no image API.
+ */
+export function figureSvg(s: ImageSuggestion): string {
+  const W = 820;
+  const H = 460;
+  const PAD = 60;
+  const titleLines = wrapText(s.section || s.caption, 30).slice(0, 2);
+  const capLines = wrapText(s.caption, 66).slice(0, 2);
+  const kws = figureKeywords(s);
+  const nodes = (kws.length >= 2 ? kws : ["01", "02", "03"]).slice(0, 3);
+
+  const n = nodes.length;
+  const gap = 26;
+  const nodeW = (W - 2 * PAD - (n - 1) * gap) / n;
+  const nodeY = 300;
+  const nodeH = 92;
+  const nodeSvg = nodes
+    .map((label, i) => {
+      const x = PAD + i * (nodeW + gap);
+      const cx = x + nodeW / 2;
+      const short = label.length > 16 ? label.slice(0, 15) + "…" : label;
+      const conn =
+        i < n - 1
+          ? `<line x1="${(x + nodeW).toFixed(0)}" y1="${nodeY + nodeH / 2}" x2="${(x + nodeW + gap).toFixed(0)}" y2="${nodeY + nodeH / 2}" stroke="#33405a" stroke-width="2"/>`
+          : "";
+      return (
+        `<rect x="${x.toFixed(0)}" y="${nodeY}" width="${nodeW.toFixed(0)}" height="${nodeH}" rx="12" fill="#16203a" stroke="#2b3a5e"/>` +
+        `<text x="${cx.toFixed(0)}" y="${nodeY + nodeH / 2 + 6}" text-anchor="middle" fill="#cdd6e6" font-size="17" font-weight="600" font-family="system-ui,Segoe UI,Arial">${escHtml(cap1(short))}</text>` +
+        conn
+      );
+    })
+    .join("");
+
+  const titleSvg = titleLines
+    .map((l, i) => `<text x="${PAD}" y="${130 + i * 44}" fill="#eef2f8" font-size="34" font-weight="700" font-family="system-ui,Segoe UI,Arial">${escHtml(l)}</text>`)
+    .join("");
+  const capY = 130 + titleLines.length * 44 + 8;
+  const capSvg = capLines
+    .map((l, i) => `<text x="${PAD}" y="${capY + i * 26}" fill="#9aa6bb" font-size="17" font-family="system-ui,Segoe UI,Arial">${escHtml(l)}</text>`)
+    .join("");
+
   return [
-    "<figure>",
-    `  <img src="image-to-generate" alt="${escAttr(s.alt)}" />`,
-    `  <figcaption>${escHtml(s.caption)}</figcaption>`,
-    "</figure>",
+    `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${escAttr(s.alt)}" style="width:100%;height:auto;display:block;border-radius:14px">`,
+    `<title>${escHtml(s.caption)}</title>`,
+    `<desc>${escHtml(s.alt)}</desc>`,
+    `<rect width="${W}" height="${H}" fill="#0e1422"/>`,
+    `<rect width="${W}" height="6" fill="#4f8cff"/>`,
+    `<text x="${PAD}" y="66" fill="#7c89a3" font-size="13" letter-spacing="2" font-family="system-ui,Segoe UI,Arial">FIGURE</text>`,
+    titleSvg,
+    capSvg,
+    nodeSvg,
+    `</svg>`,
   ].join("\n");
+}
+
+/** A machine-readable HTML figure: inline SVG (visible) + parseable caption. */
+export function figureBlock(s: ImageSuggestion): string {
+  const visual = s.svg || figureSvg(s);
+  return ["<figure>", visual, `  <figcaption>${escHtml(s.caption)}</figcaption>`, "</figure>"].join("\n");
 }
 
 /** Section headings (## / ### / bold line) in document order, plain text. */

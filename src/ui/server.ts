@@ -359,15 +359,17 @@ function renderResult(d){
   }
   // Recommended figures (machine-readable) — only when the source had no images
   if((c.imageSuggestions||[]).length){
-    h+='<div class="card full"><h3>Recommended figures (machine-readable)</h3>'+
-       '<p class="hint" style="margin:.2rem 0 .6rem">The source article had no images, so these were added to the optimized article as &lt;figure&gt; blocks with alt text and captions (which search engines and AI parse). Generate each graphic from its prompt, or drop in a branded visual.</p>';
+    h+='<div class="card full"><h3>Generated figures (inline SVG, machine-readable)</h3>'+
+       '<p class="hint" style="margin:.2rem 0 .6rem">The source had no images, so these inline-SVG figures were generated and embedded in the optimized article (under their section) as &lt;figure&gt; blocks — visible here and in the copied Markdown, and parseable by search engines and AI (they carry a title, description, and alt text). Want a richer photographic graphic instead? Use each figure&rsquo;s generation prompt in your image tool and swap it in.</p>';
     for(const s of c.imageSuggestions){
-      h+='<div style="margin:.6rem 0;border-left:3px solid var(--line);padding-left:.7rem">'+
-         '<div><b>'+esc(s.section||"Figure")+'</b></div><div class="meta">'+
+      h+='<figure style="margin:1rem 0 1.3rem">'+
+         '<div style="max-width:560px">'+(s.svg||"")+'</div>'+
+         '<figcaption class="hint" style="margin:.4rem 0 0">'+esc(s.caption)+'</figcaption>'+
+         '<div class="meta" style="margin-top:.5rem">'+
          '<div class="metarow"><span class="metak">Alt text</span><span class="metav">'+esc(s.alt)+'</span></div>'+
-         '<div class="metarow"><span class="metak">Caption</span><span class="metav">'+esc(s.caption)+'</span></div>'+
-         '<div class="metarow"><span class="metak">Generation prompt</span><span class="metav">'+esc(s.prompt)+'</span></div>'+
-         '</div></div>';
+         '<div class="metarow"><span class="metak">Section</span><span class="metav">'+esc(s.section||"")+'</span></div>'+
+         '<div class="metarow"><span class="metak">Generation prompt (for a richer graphic)</span><span class="metav">'+esc(s.prompt)+'</span></div>'+
+         '</div></figure>';
     }
     h+='</div>';
   }

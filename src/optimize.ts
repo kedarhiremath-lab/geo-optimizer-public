@@ -7,7 +7,7 @@ import { extractArticle } from "./extract.js";
 import { scoreOriginal, buildFixList, scoreOptimized, topicOverlap, countStats, explainScore, articleFromMarkdown } from "./score.js";
 import { computeReadability, editorialChangeBudget, evaluateEditorialGates, dedupeTitle, splitDenseParagraphs } from "./editorial.js";
 import { traceInterview } from "./trace.js";
-import { pickFigures, insertFigures, ensureDownloadsSection, ensureSourcesSection } from "./assets.js";
+import { pickFigures, insertFigures, ensureDownloadsSection, ensureSourcesSection, figureSvg } from "./assets.js";
 import { articleBodyPrompt, structuredMetaPrompt } from "./prompts.js";
 import { claimDiff } from "./claimDiff.js";
 import { buildSchemas } from "./schema.js";
@@ -256,7 +256,8 @@ export async function optimize(
   // or the claim-diff (which run on the prose).
   const hasSourceImages = (article.images?.length ?? 0) > 0;
   const figures = hasSourceImages ? [] : pickFigures(content.imageSuggestions ?? [], article.headings, 2, 4);
-  content.imageSuggestions = figures; // surface the placed figures in the UI
+  figures.forEach((f) => (f.svg = figureSvg(f))); // render a real, visible inline SVG per figure
+  content.imageSuggestions = figures; // surface the placed figures (with SVG) in the UI
   let publishArticle = insertFigures(fullArticle, figures);
   publishArticle = ensureDownloadsSection(publishArticle, article.downloads ?? []);
   // Preserve the original article's external citations (its "Sources" section).
