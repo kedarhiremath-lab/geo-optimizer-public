@@ -730,7 +730,7 @@ function renderDashboard(): string {
     ? rows
         .map(
           (r) =>
-            `<tr><td><a href="/r/${r.id}">${esc(r.title)}</a></td><td class="sc" style="color:${r.score >= 70 ? "#39d98a" : r.score >= 45 ? "#e0b341" : "#ff6b6b"}">${r.score}</td><td>${new Date(r.savedAt).toLocaleString()}</td><td><a href="${esc(r.url)}" target="_blank" rel="noopener">source</a></td></tr>`,
+            `<tr><td><a href="/r/${r.id}">${esc(r.title)}</a></td><td class="sc" style="color:${r.score >= 70 ? "#39d98a" : r.score >= 45 ? "#e0b341" : "#ff6b6b"}">${r.score}</td><td>${new Date(r.savedAt).toLocaleString("en-US", { timeZone: "America/Chicago", timeZoneName: "short" })}</td><td><a href="${esc(r.url)}" target="_blank" rel="noopener">source</a></td></tr>`,
         )
         .join("")
     : '<tr><td colspan="4" style="color:#9aa6bb">No optimized articles yet. Optimize one, then it appears here.</td></tr>';
