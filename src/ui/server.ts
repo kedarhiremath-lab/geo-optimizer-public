@@ -3,68 +3,18 @@
 // Internal tool, runs locally (no auth, no hosting — out of scope for M1).
 
 import express from "express";
-import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
 import { analyze, optimize, suggestInterviewAnswers } from "../optimize.js";
 import { createProvider } from "../llm.js";
 import { INTERVIEW_LENSES } from "../interview.js";
 import { getLearnings, addLearnings, clearLearnings } from "../learnings.js";
+import { saveResult, loadResultById, loadResultByUrl, listResults, resultIdFor, repoIsDurable } from "../repo.js";
 
 // Article repository (#6): every optimization is stored, keyed by source URL, so
 // re-optimizing the same article OVERWRITES the previous version (latest only —
-// no duplicates). Doubles as the demo safety net (serve cached on quota error).
-const RESULT_CACHE = join(process.cwd(), "cache", "results");
-function resultIdFor(url: string): string {
-  return createHash("sha256").update(url).digest("hex").slice(0, 16);
-}
-function resultPath(url: string): string {
-  return join(RESULT_CACHE, resultIdFor(url) + ".json");
-}
-function loadResultById(id: string): unknown | null {
-  try {
-    const p = join(RESULT_CACHE, id + ".json");
-    return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : null;
-  } catch {
-    return null;
-  }
-}
-interface RepoEntry { id: string; url: string; title: string; score: number; savedAt: number; }
-function listResults(): RepoEntry[] {
-  try {
-    if (!existsSync(RESULT_CACHE)) return [];
-    return readdirSync(RESULT_CACHE)
-      .filter((f) => f.endsWith(".json"))
-      .map((f): RepoEntry | null => {
-        try {
-          const r = JSON.parse(readFileSync(join(RESULT_CACHE, f), "utf8"));
-          return { id: f.replace(/\.json$/, ""), url: r.url || "", title: r.title || r.url || "Untitled", score: r.optimizedScore ?? 0, savedAt: statSync(join(RESULT_CACHE, f)).mtimeMs };
-        } catch {
-          return null;
-        }
-      })
-      .filter((x): x is RepoEntry => x !== null)
-      .sort((a, b) => b.savedAt - a.savedAt);
-  } catch {
-    return [];
-  }
-}
-function saveResult(url: string, result: unknown): void {
-  try {
-    mkdirSync(RESULT_CACHE, { recursive: true });
-    writeFileSync(resultPath(url), JSON.stringify(result), "utf8");
-  } catch {
-    /* cache write is best-effort */
-  }
-}
-function loadResult(url: string): unknown | null {
-  try {
-    const p = resultPath(url);
-    return existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : null;
-  } catch {
-    return null;
-  }
-}
+// no duplicates). Storage is DURABLE when Upstash is configured (persists forever
+// across restarts), else the local file cache. See src/repo.ts.
 
 function loadEnv(): void {
   const p = join(process.cwd(), ".env");
@@ -663,14 +613,14 @@ app.post("/api/optimize", async (req, res) => {
   try {
     const result = await optimize(url, createProvider(), { answers });
     clearTimeout(timeout);
-    saveResult(url, result); // store in the repository (overwrites the prior version of this URL)
+    await saveResult(url, result); // store in the repository (overwrites the prior version of this URL)
     if (!res.headersSent) res.json({ ...result, savedUrl: "/r/" + resultIdFor(url) });
   } catch (err) {
     clearTimeout(timeout);
     const raw = err instanceof Error ? err.message : String(err);
     // Demo safety net: on quota/credit/transient failure, serve the last good result.
     if (/429|quota|rate.?limit|resource.?exhausted|overloaded|529|credit balance|billing|all gemini models failed/i.test(raw)) {
-      const cached = loadResult(url) as Record<string, unknown> | null;
+      const cached = (await loadResultByUrl(url)) as Record<string, unknown> | null;
       if (cached) {
         if (!res.headersSent) res.json({ ...cached, servedFromCache: true, savedUrl: "/r/" + resultIdFor(url) });
         return;
@@ -707,13 +657,13 @@ app.post("/api/learn/clear", (_req, res) => {
 });
 
 // #6 — article repository: fetch a stored result, view it, and the dashboard.
-app.get("/api/result/:id", (req, res) => {
+app.get("/api/result/:id", async (req, res) => {
   const id = req.params.id;
   if (!/^[a-f0-9]{16}$/.test(id)) {
     res.status(400).json({ error: "bad id" });
     return;
   }
-  const r = loadResultById(id);
+  const r = await loadResultById(id);
   if (!r) {
     res.status(404).json({ error: "Not found — it may have been overwritten or the server restarted." });
     return;
@@ -721,11 +671,11 @@ app.get("/api/result/:id", (req, res) => {
   res.json({ ...(r as Record<string, unknown>), savedUrl: "/r/" + id });
 });
 app.get("/r/:id", (_req, res) => res.type("html").send(PAGE)); // client bootstraps via /api/result/:id
-app.get("/dashboard", (_req, res) => res.type("html").send(renderDashboard()));
+app.get("/dashboard", async (_req, res) => res.type("html").send(await renderDashboard()));
 
-function renderDashboard(): string {
+async function renderDashboard(): Promise<string> {
   const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
-  const rows = listResults();
+  const rows = await listResults();
   const body = rows.length
     ? rows
         .map(
@@ -754,4 +704,8 @@ process.on("unhandledRejection", (reason) => {
 });
 
 const PORT = Number(process.env.PORT) || 5173;
-app.listen(PORT, () => console.log(`GEO/SEO optimizer UI on http://localhost:${PORT}`));
+app.listen(PORT, () =>
+  console.log(
+    `GEO/SEO optimizer UI on http://localhost:${PORT} — repository: ${repoIsDurable() ? "DURABLE (Upstash)" : "ephemeral file cache (set UPSTASH_REDIS_REST_URL/_TOKEN to persist)"}`,
+  ),
+);
