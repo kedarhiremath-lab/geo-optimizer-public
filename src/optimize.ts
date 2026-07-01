@@ -8,7 +8,6 @@ import { scoreOriginal, buildFixList, scoreOptimized, topicOverlap, countStats, 
 import { computeReadability, editorialChangeBudget, evaluateEditorialGates, dedupeTitle, splitDenseParagraphs } from "./editorial.js";
 import { traceInterview } from "./trace.js";
 import { pickFigures, insertFigures, ensureDownloadsSection, ensureSourcesSection, figureSvg } from "./assets.js";
-import { imageGenAvailable, generateImage } from "./imageGen.js";
 import { articleBodyPrompt, structuredMetaPrompt, interviewSuggestionsPrompt } from "./prompts.js";
 import { claimDiff } from "./claimDiff.js";
 import { buildSchemas } from "./schema.js";
@@ -290,17 +289,10 @@ export async function optimize(
   // or the claim-diff (which run on the prose).
   const hasSourceImages = (article.images?.length ?? 0) > 0;
   const figures = hasSourceImages ? [] : pickFigures(content.imageSuggestions ?? [], article.headings, 2, 4);
-  figures.forEach((f) => (f.svg = figureSvg(f))); // inline SVG fallback per figure
-  // If a real image API is configured (#2), generate an actual image per figure
-  // (in parallel). On failure, the SVG remains as the fallback.
-  if (figures.length && imageGenAvailable()) {
-    await Promise.all(
-      figures.map(async (f) => {
-        const img = await generateImage(f.prompt, f.kind).catch(() => null);
-        if (img) f.image = img;
-      }),
-    );
-  }
+  // Render each figure as a clean, machine-readable inline SVG (image | graphic |
+  // graph, per f.kind). Free — no image API. Users can Re-generate for a fresh
+  // palette, or Download as PNG/SVG.
+  figures.forEach((f) => (f.svg = figureSvg(f)));
   content.imageSuggestions = figures; // surface the placed figures in the UI
   let publishArticle = insertFigures(fullArticle, figures);
   publishArticle = ensureDownloadsSection(publishArticle, article.downloads ?? []);

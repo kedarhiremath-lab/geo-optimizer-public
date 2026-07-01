@@ -48,60 +48,153 @@ function figureKeywords(s: ImageSuggestion): string[] {
   return [...new Set(words)].slice(0, 3);
 }
 
-/**
- * Render a clean, self-contained inline SVG figure derived from the section
- * subtitle + caption. Real, visible, and machine-readable (it carries <title>,
- * <desc>, and aria-label that search engines and AI parse) — no image API.
- */
-export function figureSvg(s: ImageSuggestion): string {
-  const W = 820;
-  const H = 460;
-  const PAD = 60;
-  const titleLines = wrapText(s.section || s.caption, 30).slice(0, 2);
-  const capLines = wrapText(s.caption, 66).slice(0, 2);
-  const kws = figureKeywords(s);
-  const nodes = (kws.length >= 2 ? kws : ["01", "02", "03"]).slice(0, 3);
+// Dark, on-brand palettes. The "Re-generate" button cycles a seed, which picks a
+// palette (and, for the graph, varies the bars) so each take looks different.
+interface Palette {
+  bg: string;
+  panel: string;
+  accent: string;
+  ink: string;
+  muted: string;
+  stroke: string;
+}
+const PALETTES: Palette[] = [
+  { bg: "#0e1422", panel: "#16203a", accent: "#4f8cff", ink: "#eef2f8", muted: "#9aa6bb", stroke: "#2b3a5e" },
+  { bg: "#0d1a14", panel: "#14271d", accent: "#2ec28a", ink: "#eaf5ee", muted: "#93b3a2", stroke: "#265041" },
+  { bg: "#160f1f", panel: "#241733", accent: "#b06cff", ink: "#f2ecfa", muted: "#a99bbd", stroke: "#3d2b5e" },
+  { bg: "#1a1410", panel: "#2a1f14", accent: "#f6a83c", ink: "#faf1e6", muted: "#bda98f", stroke: "#5e452b" },
+];
 
+const FONT = "system-ui,Segoe UI,Arial";
+
+/** Deterministic 0..1 from two ints (so a given seed always renders the same). */
+function rnd(a: number, b: number): number {
+  const x = Math.sin((a + 1) * 12.9898 + (b + 1) * 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/** GRAPHIC body: a step / component diagram — labelled nodes joined by connectors. */
+function graphicBody(s: ImageSuggestion, pal: Palette, W: number, PAD: number, top: number): string {
+  const kws = figureKeywords(s);
+  const nodes = (kws.length >= 2 ? kws : ["Input", "Process", "Output"]).slice(0, 3);
   const n = nodes.length;
-  const gap = 26;
+  const gap = 28;
   const nodeW = (W - 2 * PAD - (n - 1) * gap) / n;
-  const nodeY = 300;
-  const nodeH = 92;
-  const nodeSvg = nodes
+  const nodeH = 100;
+  const nodeY = Math.max(top + 24, 240);
+  return nodes
     .map((label, i) => {
       const x = PAD + i * (nodeW + gap);
       const cx = x + nodeW / 2;
-      const short = label.length > 16 ? label.slice(0, 15) + "…" : label;
+      const short = cap1(label.length > 16 ? label.slice(0, 15) + "…" : label);
       const conn =
         i < n - 1
-          ? `<line x1="${(x + nodeW).toFixed(0)}" y1="${nodeY + nodeH / 2}" x2="${(x + nodeW + gap).toFixed(0)}" y2="${nodeY + nodeH / 2}" stroke="#33405a" stroke-width="2"/>`
+          ? `<line x1="${(x + nodeW).toFixed(0)}" y1="${nodeY + nodeH / 2}" x2="${(x + nodeW + gap).toFixed(0)}" y2="${nodeY + nodeH / 2}" stroke="${pal.accent}" stroke-width="2"/>`
           : "";
       return (
-        `<rect x="${x.toFixed(0)}" y="${nodeY}" width="${nodeW.toFixed(0)}" height="${nodeH}" rx="12" fill="#16203a" stroke="#2b3a5e"/>` +
-        `<text x="${cx.toFixed(0)}" y="${nodeY + nodeH / 2 + 6}" text-anchor="middle" fill="#cdd6e6" font-size="17" font-weight="600" font-family="system-ui,Segoe UI,Arial">${escHtml(cap1(short))}</text>` +
+        `<rect x="${x.toFixed(0)}" y="${nodeY}" width="${nodeW.toFixed(0)}" height="${nodeH}" rx="12" fill="${pal.panel}" stroke="${pal.stroke}"/>` +
+        `<circle cx="${(x + 24).toFixed(0)}" cy="${nodeY + 24}" r="7" fill="${pal.accent}"/>` +
+        `<text x="${cx.toFixed(0)}" y="${nodeY + nodeH / 2 + 16}" text-anchor="middle" fill="${pal.ink}" font-size="18" font-weight="600" font-family="${FONT}">${escHtml(short)}</text>` +
         conn
       );
     })
     .join("");
+}
 
+/** GRAPH body: a labelled bar chart. Bar heights vary with the seed. */
+function graphBody(s: ImageSuggestion, pal: Palette, seed: number, W: number, H: number, PAD: number): string {
+  const kws = figureKeywords(s);
+  const labels = (kws.length >= 2 ? kws : ["Baseline", "Improved", "Best"]).slice(0, 4);
+  const n = labels.length;
+  const axisX = PAD + 6;
+  const baseY = H - 70;
+  const chartTop = 200;
+  const chartH = baseY - chartTop;
+  const gap = 26;
+  const barW = (W - PAD - axisX - 14 - (n - 1) * gap) / n;
+  let out =
+    `<line x1="${axisX}" y1="${chartTop - 12}" x2="${axisX}" y2="${baseY}" stroke="${pal.stroke}" stroke-width="2"/>` +
+    `<line x1="${axisX}" y1="${baseY}" x2="${W - PAD}" y2="${baseY}" stroke="${pal.stroke}" stroke-width="2"/>`;
+  for (let g = 1; g <= 3; g++) {
+    const gy = (baseY - (chartH * g) / 4).toFixed(0);
+    out += `<line x1="${axisX}" y1="${gy}" x2="${W - PAD}" y2="${gy}" stroke="${pal.stroke}" stroke-width="1" opacity="0.4"/>`;
+  }
+  labels.forEach((label, i) => {
+    const frac = 0.35 + rnd(seed, i) * 0.6;
+    const bh = chartH * Math.min(frac, 0.98);
+    const x = axisX + 16 + i * (barW + gap);
+    const y = baseY - bh;
+    const short = cap1(label.length > 10 ? label.slice(0, 9) + "…" : label);
+    out +=
+      `<rect x="${x.toFixed(0)}" y="${y.toFixed(0)}" width="${barW.toFixed(0)}" height="${bh.toFixed(0)}" rx="6" fill="${pal.accent}" opacity="0.9"/>` +
+      `<text x="${(x + barW / 2).toFixed(0)}" y="${(y - 8).toFixed(0)}" text-anchor="middle" fill="${pal.ink}" font-size="15" font-weight="700" font-family="${FONT}">${Math.round(frac * 100)}</text>` +
+      `<text x="${(x + barW / 2).toFixed(0)}" y="${baseY + 24}" text-anchor="middle" fill="${pal.muted}" font-size="14" font-family="${FONT}">${escHtml(short)}</text>`;
+  });
+  return out;
+}
+
+/** IMAGE body: a framed panel with a clean, stylized robotic-arm glyph. */
+function imageBody(pal: Palette, W: number, H: number, PAD: number, top: number): string {
+  const px = PAD;
+  const py = Math.max(top + 12, 176);
+  const pw = W - 2 * PAD;
+  const ph = H - 40 - py;
+  const panel = `<rect x="${px}" y="${py}" width="${pw}" height="${ph}" rx="14" fill="${pal.panel}" opacity="0.55" stroke="${pal.stroke}"/>`;
+  const cx = W / 2;
+  const gy = H - 74;
+  const link = (x1: number, y1: number, x2: number, y2: number) =>
+    `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${pal.accent}" stroke-width="16" stroke-linecap="round"/>`;
+  const joint = (x: number, y: number) =>
+    `<circle cx="${x}" cy="${y}" r="13" fill="${pal.bg}" stroke="${pal.accent}" stroke-width="4"/>`;
+  const arm =
+    `<rect x="${cx - 64}" y="${gy}" width="128" height="16" rx="5" fill="${pal.ink}" opacity="0.85"/>` +
+    link(cx, gy, cx - 70, gy - 120) +
+    link(cx - 70, gy - 120, cx + 60, gy - 165) +
+    joint(cx, gy) +
+    joint(cx - 70, gy - 120) +
+    joint(cx + 60, gy - 165) +
+    `<rect x="${cx + 92}" y="${gy - 196}" width="10" height="26" rx="3" fill="${pal.accent}"/>` +
+    `<rect x="${cx + 92}" y="${gy - 166}" width="10" height="26" rx="3" fill="${pal.accent}"/>` +
+    `<rect x="${cx + 108}" y="${gy - 184}" width="26" height="26" rx="4" fill="${pal.ink}" opacity="0.9"/>`;
+  return panel + arm;
+}
+
+/**
+ * Render a clean, self-contained inline SVG figure derived from the section
+ * subtitle + caption — as one of three formats (image | graphic | graph) per
+ * s.kind. Real, visible, and machine-readable (it carries <title>, <desc>, and
+ * aria-label that search engines and AI parse) — no image API, no cost. `seed`
+ * varies the palette (and the graph's bars) so "Re-generate" yields a fresh take.
+ */
+export function figureSvg(s: ImageSuggestion, seed = 0): string {
+  const W = 820;
+  const H = 460;
+  const PAD = 56;
+  const pal = PALETTES[((seed % PALETTES.length) + PALETTES.length) % PALETTES.length];
+  const kind = s.kind === "graph" ? "graph" : s.kind === "graphic" ? "graphic" : "image";
+  const kindLabel = kind === "graph" ? "GRAPH" : kind === "graphic" ? "GRAPHIC" : "IMAGE";
+  const titleLines = wrapText(s.section || s.caption, 34).slice(0, 2);
   const titleSvg = titleLines
-    .map((l, i) => `<text x="${PAD}" y="${130 + i * 44}" fill="#eef2f8" font-size="34" font-weight="700" font-family="system-ui,Segoe UI,Arial">${escHtml(l)}</text>`)
+    .map((l, i) => `<text x="${PAD}" y="${104 + i * 40}" fill="${pal.ink}" font-size="30" font-weight="700" font-family="${FONT}">${escHtml(l)}</text>`)
     .join("");
-  const capY = 130 + titleLines.length * 44 + 8;
-  const capSvg = capLines
-    .map((l, i) => `<text x="${PAD}" y="${capY + i * 26}" fill="#9aa6bb" font-size="17" font-family="system-ui,Segoe UI,Arial">${escHtml(l)}</text>`)
-    .join("");
+  const bodyTop = 104 + titleLines.length * 40 + 6;
 
+  let body: string;
+  if (kind === "graph") body = graphBody(s, pal, seed, W, H, PAD);
+  else if (kind === "graphic") body = graphicBody(s, pal, W, PAD, bodyTop);
+  else body = imageBody(pal, W, H, PAD, bodyTop);
+
+  const capLine = wrapText(s.caption, 80).slice(0, 1)[0] || "";
   return [
     `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${escAttr(s.alt)}" style="width:100%;height:auto;display:block;border-radius:14px">`,
     `<title>${escHtml(s.caption)}</title>`,
     `<desc>${escHtml(s.alt)}</desc>`,
-    `<rect width="${W}" height="${H}" fill="#0e1422"/>`,
-    `<rect width="${W}" height="6" fill="#4f8cff"/>`,
-    `<text x="${PAD}" y="66" fill="#7c89a3" font-size="13" letter-spacing="2" font-family="system-ui,Segoe UI,Arial">FIGURE</text>`,
+    `<rect width="${W}" height="${H}" fill="${pal.bg}"/>`,
+    `<rect width="${W}" height="6" fill="${pal.accent}"/>`,
+    `<text x="${PAD}" y="60" fill="${pal.accent}" font-size="13" letter-spacing="3" font-weight="700" font-family="${FONT}">${kindLabel}</text>`,
     titleSvg,
-    capSvg,
-    nodeSvg,
+    body,
+    `<text x="${PAD}" y="${H - 24}" fill="${pal.muted}" font-size="15" font-family="${FONT}">${escHtml(capLine)}</text>`,
     `</svg>`,
   ].join("\n");
 }

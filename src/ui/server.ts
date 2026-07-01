@@ -10,7 +10,7 @@ import { createProvider } from "../llm.js";
 import { INTERVIEW_LENSES } from "../interview.js";
 import { getLearnings, addLearnings, clearLearnings } from "../learnings.js";
 import { saveResult, loadResultById, loadResultByUrl, listResults, resultIdFor, repoIsDurable } from "../repo.js";
-import { generateImage } from "../imageGen.js";
+import { figureSvg } from "../assets.js";
 
 // Article repository (#6): every optimization is stored, keyed by source URL, so
 // re-optimizing the same article OVERWRITES the previous version (latest only —
@@ -395,9 +395,9 @@ function renderResult(d){
   // Recommended figures (machine-readable) — only when the source had no images
   if((c.imageSuggestions||[]).length){
     h+='<div class="card full"><h3>Generated figures</h3>'+
-       '<p class="hint" style="margin:.2rem 0 .6rem">The source had no images, so these figures were generated and embedded in the optimized article (under their section) as &lt;figure&gt; blocks with alt text + captions. If you do not like one, hit <b>Re-generate image</b> for a fresh take. Download to save it, then Insert → Image in Wix.</p>';
+       '<p class="hint" style="margin:.2rem 0 .6rem">The source had no images, so these figures were generated as clean, machine-readable SVGs (image, graphic, or graph) and embedded in the optimized article under their section as &lt;figure&gt; blocks with alt text + captions. Hit <b>Re-generate image</b> for a different color/variation, then Download PNG or SVG and Insert → Image in Wix.</p>';
     c.imageSuggestions.forEach((s,fi)=>{
-      const vis=s.image?('<img src="'+esc(s.image)+'" alt="'+esc(s.alt)+'" style="width:100%;height:auto;border-radius:14px">'):(s.svg||"");
+      const vis=s.svg||"";
       h+='<figure style="margin:1rem 0 1.3rem">'+
          '<div style="max-width:560px" id="figvis-'+fi+'">'+vis+'</div>'+
          '<figcaption class="hint" style="margin:.4rem 0 .4rem">'+esc(s.caption)+'</figcaption>'+
@@ -532,7 +532,6 @@ function bindFigDownloads(){
   document.querySelectorAll(".figdl").forEach(b=>b.onclick=async()=>{
     const i=+b.dataset.fig, f=FIGS[i]; if(!f)return;
     if(b.dataset.kind==="svg"){ if(f.svg) downloadBlob(new Blob([f.svg],{type:"image/svg+xml;charset=utf-8"}),"figure-"+(i+1)+".svg"); }
-    else if(f.image){ try{ const bl=await (await fetch(f.image)).blob(); downloadBlob(bl,"figure-"+(i+1)+".png"); }catch(e){ alert("Download failed."); } }
     else if(f.svg){ svgToPng(f.svg,"figure-"+(i+1)+".png"); }
     const o=b.textContent;b.textContent="Saved ✓";setTimeout(()=>b.textContent=o,1200);
   });
@@ -541,13 +540,14 @@ function bindFigRegen(){
   document.querySelectorAll(".figregen").forEach(b=>b.onclick=async()=>{
     const i=+b.dataset.fig, f=FIGS[i]; if(!f)return;
     const o=b.textContent; b.textContent="Generating…"; b.disabled=true;
+    f._seed=(f._seed||0)+1;
     try{
-      const r=await fetch("/api/regenerate-image",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({prompt:f.prompt,kind:f.kind||"image"})});
+      const r=await fetch("/api/regenerate-image",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({section:f.section||"",caption:f.caption||"",alt:f.alt||"",kind:f.kind||"image",seed:f._seed})});
       const d=await r.json();
-      if(!r.ok||!d.image) throw new Error(d.error||"failed");
-      f.image=d.image;
-      const vis=$("#figvis-"+i); if(vis) vis.innerHTML='<img src="'+d.image+'" alt="'+esc(f.alt||"")+'" style="width:100%;height:auto;border-radius:14px">';
-    }catch(e){ alert("Could not re-generate image: "+e.message); }
+      if(!r.ok||!d.svg) throw new Error(d.error||"failed");
+      f.svg=d.svg;
+      const vis=$("#figvis-"+i); if(vis) vis.innerHTML=d.svg;
+    }catch(e){ alert("Could not re-generate figure: "+e.message); }
     finally{ b.textContent=o; b.disabled=false; }
   });
 }
@@ -681,21 +681,25 @@ app.post("/api/suggest", async (req, res) => {
   }
 });
 
-// #2 — re-generate a single figure image on demand (Re-generate button).
-app.post("/api/regenerate-image", async (req, res) => {
-  const prompt = (req.body?.prompt ?? "").toString().trim();
-  const kind = (req.body?.kind ?? "image").toString();
-  if (!prompt) {
-    res.status(400).json({ error: "missing prompt" });
-    return;
-  }
+// Re-generate a single figure (Re-generate button): render a fresh SVG variant
+// with a new seed (different palette / bar layout). Free — no image API.
+app.post("/api/regenerate-image", (req, res) => {
+  const b = req.body ?? {};
+  const kindRaw = (b.kind ?? "image").toString();
+  const kind: "image" | "graphic" | "graph" = kindRaw === "graphic" ? "graphic" : kindRaw === "graph" ? "graph" : "image";
+  const seed = Number.isFinite(Number(b.seed)) ? Math.floor(Number(b.seed)) : 0;
   try {
-    const image = await generateImage(prompt, kind);
-    if (!image) {
-      res.status(503).json({ error: "Image generation isn't enabled — set IMAGE_API + the provider key." });
-      return;
-    }
-    res.json({ image });
+    const svg = figureSvg(
+      {
+        section: (b.section ?? "").toString(),
+        caption: (b.caption ?? "").toString(),
+        alt: (b.alt ?? "").toString(),
+        kind,
+        prompt: "",
+      },
+      seed,
+    );
+    res.json({ svg });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
