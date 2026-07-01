@@ -526,7 +526,7 @@ function bindFigRegen(){
     const i=+b.dataset.fig, f=FIGS[i]; if(!f)return;
     const o=b.textContent; b.textContent="Generating…"; b.disabled=true;
     try{
-      const r=await fetch("/api/regenerate-image",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({prompt:f.prompt})});
+      const r=await fetch("/api/regenerate-image",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({prompt:f.prompt,kind:f.kind||"image"})});
       const d=await r.json();
       if(!r.ok||!d.image) throw new Error(d.error||"failed");
       f.image=d.image;
@@ -672,12 +672,13 @@ app.post("/api/suggest", async (req, res) => {
 // #2 — re-generate a single figure image on demand (Re-generate button).
 app.post("/api/regenerate-image", async (req, res) => {
   const prompt = (req.body?.prompt ?? "").toString().trim();
+  const kind = (req.body?.kind ?? "image").toString();
   if (!prompt) {
     res.status(400).json({ error: "missing prompt" });
     return;
   }
   try {
-    const image = await generateImage(prompt);
+    const image = await generateImage(prompt, kind);
     if (!image) {
       res.status(503).json({ error: "Image generation isn't enabled — set IMAGE_API + the provider key." });
       return;

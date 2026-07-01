@@ -39,6 +39,7 @@ export interface Article {
 /** A recommended machine-readable figure for a section that has no image. */
 export interface ImageSuggestion {
   section: string; // the subtitle this figure sits under
+  kind?: "image" | "graphic" | "graph"; // most suitable format for this figure
   alt: string; // machine-readable alt text (what the figure shows)
   caption: string; // visible figcaption
   prompt: string; // ready-to-use image-generation prompt to produce the actual graphic

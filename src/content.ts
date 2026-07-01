@@ -70,8 +70,10 @@ function asImageSuggestions(v: unknown): ImageSuggestion[] {
   return v
     .map((e) => {
       const o = (e ?? {}) as Record<string, unknown>;
+      const kind: "image" | "graphic" | "graph" = o.kind === "graphic" ? "graphic" : o.kind === "graph" ? "graph" : "image";
       return {
         section: typeof o.section === "string" ? o.section : "",
+        kind,
         alt: typeof o.alt === "string" ? o.alt : "",
         caption: typeof o.caption === "string" ? o.caption : "",
         prompt: typeof o.prompt === "string" ? o.prompt : "",

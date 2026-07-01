@@ -286,7 +286,7 @@ export async function optimize(
   if (figures.length && imageGenAvailable()) {
     await Promise.all(
       figures.map(async (f) => {
-        const img = await generateImage(f.prompt).catch(() => null);
+        const img = await generateImage(f.prompt, f.kind).catch(() => null);
         if (img) f.image = img;
       }),
     );

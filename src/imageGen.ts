@@ -22,31 +22,41 @@ export function imageProviderName(): string {
 }
 
 /**
- * Style wrapper every image prompt passes through. Enforces the two things AI
- * image models get wrong: (1) NO text — models misspell and clip words; (2)
- * composition — keep the whole subject inside the frame with margins so nothing
- * is cut off at the edges.
+ * Style wrapper every image prompt passes through. Produces AI-forward, high-
+ * production visuals (NOT flat clipart), in one of three formats — a photoreal
+ * image, a polished graphic/infographic, or a data graph — and enforces the two
+ * things models get wrong: composition (nothing cut off) and legible text.
  */
-function stylePrompt(prompt: string): string {
+function stylePrompt(prompt: string, kind = "image"): string {
+  const k = (kind || "image").toLowerCase();
+  let kindStyle: string;
+  if (k === "graph")
+    kindStyle =
+      "FORMAT — DATA GRAPH: render a clean, professional data chart (bar, line, or similar) that visualizes the described data. Axis titles and category labels must be correctly spelled, legible, and fully inside the frame.";
+  else if (k === "graphic")
+    kindStyle =
+      "FORMAT — GRAPHIC/INFOGRAPHIC: render a polished, modern, high-production graphic — depth, subtle gradients, refined iconography, magazine quality. NOT flat clipart, NOT a simple cartoon.";
+  else
+    kindStyle =
+      "FORMAT — PHOTOREALISTIC IMAGE: render a high-fidelity, studio-quality photograph or realistic 3D render. Cinematic lighting, real materials and textures, sharp detail. NOT an illustration, NOT clipart.";
   return (
     `${prompt}\n\n` +
-    "STYLE: clean, modern, professional editorial illustration for a robotics/AI company blog; " +
-    "cohesive muted palette; technical but approachable; flat vector look.\n" +
-    "COMPOSITION: the entire subject sits fully inside the frame with generous margins on ALL sides — " +
-    "nothing cropped, cut off, zoomed-in, or touching the edges; centered and balanced; single clear focal subject.\n" +
-    "STRICT — NO TEXT: the image must contain absolutely no text, words, letters, numbers, labels, captions, " +
-    "titles, callouts, annotations, watermarks, or logos of any kind. It is a purely visual illustration — " +
-    "zero typography. (Text is described separately in the alt/caption, never rendered in the image.)"
+    "STYLE: modern, premium, AI-forward visual for a robotics/AI company blog — high production value.\n" +
+    kindStyle +
+    "\nCOMPOSITION: keep the entire subject AND any text fully inside the frame with generous margins on all " +
+    "sides — nothing cropped, cut off, zoomed past, or running off the edges; centered and balanced.\n" +
+    "TEXT: any words in the image must be minimal (roughly 0-6 words), correctly spelled, large, and fully " +
+    "legible well inside the frame — never clipped at an edge. No watermarks."
   );
 }
 
-async function viaOpenAI(prompt: string): Promise<string | null> {
+async function viaOpenAI(prompt: string, kind: string): Promise<string | null> {
   const size = process.env.IMAGE_SIZE || "1024x1024";
   const quality = process.env.IMAGE_QUALITY || "medium";
   const r = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: { Authorization: "Bearer " + process.env.OPENAI_API_KEY, "content-type": "application/json" },
-    body: JSON.stringify({ model: "gpt-image-1", prompt: stylePrompt(prompt), size, quality, n: 1 }),
+    body: JSON.stringify({ model: "gpt-image-1", prompt: stylePrompt(prompt, kind), size, quality, n: 1 }),
   });
   if (!r.ok) throw new Error("openai image " + r.status + " " + (await r.text()).slice(0, 200));
   const d = (await r.json()) as { data?: { b64_json?: string; url?: string }[] };
@@ -55,13 +65,13 @@ async function viaOpenAI(prompt: string): Promise<string | null> {
   return d.data?.[0]?.url ?? null;
 }
 
-async function viaGoogle(prompt: string): Promise<string | null> {
+async function viaGoogle(prompt: string, kind: string): Promise<string | null> {
   const key = process.env.GEMINI_IMAGE_API_KEY || process.env.GEMINI_API_KEY;
   const model = process.env.IMAGE_MODEL || "gemini-2.5-flash-image";
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts: [{ text: "Generate an image. " + stylePrompt(prompt) }] }] }),
+    body: JSON.stringify({ contents: [{ parts: [{ text: "Generate an image. " + stylePrompt(prompt, kind) }] }] }),
   });
   if (!r.ok) throw new Error("google image " + r.status + " " + (await r.text()).slice(0, 200));
   const d = (await r.json()) as { candidates?: { content?: { parts?: { inlineData?: { mimeType?: string; data?: string } }[] } }[] };
@@ -72,12 +82,13 @@ async function viaGoogle(prompt: string): Promise<string | null> {
   return null;
 }
 
-/** Generate a real image; returns a base64 data URL, or null on any failure. */
-export async function generateImage(prompt: string): Promise<string | null> {
+/** Generate a real image; returns a base64 data URL, or null on any failure.
+ * `kind` selects the format: "image" (photoreal), "graphic", or "graph". */
+export async function generateImage(prompt: string, kind = "image"): Promise<string | null> {
   const p = (process.env.IMAGE_API || "").toLowerCase();
   try {
-    if (p === "openai" && process.env.OPENAI_API_KEY) return await viaOpenAI(prompt);
-    if (p === "google" && (process.env.GEMINI_IMAGE_API_KEY || process.env.GEMINI_API_KEY)) return await viaGoogle(prompt);
+    if (p === "openai" && process.env.OPENAI_API_KEY) return await viaOpenAI(prompt, kind);
+    if (p === "google" && (process.env.GEMINI_IMAGE_API_KEY || process.env.GEMINI_API_KEY)) return await viaGoogle(prompt, kind);
   } catch {
     /* fall through to null — the SVG figure remains as fallback */
   }
