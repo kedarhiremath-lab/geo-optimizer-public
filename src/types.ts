@@ -43,6 +43,7 @@ export interface ImageSuggestion {
   caption: string; // visible figcaption
   prompt: string; // ready-to-use image-generation prompt to produce the actual graphic
   svg?: string; // rendered inline SVG figure (real, visible, machine-readable; no API)
+  image?: string; // real AI-generated image as a base64 data URL (when the image API is on)
 }
 
 /** A single checklist dimension and how the original post scored on it. */

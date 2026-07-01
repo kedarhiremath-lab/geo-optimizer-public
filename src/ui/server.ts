@@ -10,6 +10,7 @@ import { createProvider } from "../llm.js";
 import { INTERVIEW_LENSES } from "../interview.js";
 import { getLearnings, addLearnings, clearLearnings } from "../learnings.js";
 import { saveResult, loadResultById, loadResultByUrl, listResults, resultIdFor, repoIsDurable } from "../repo.js";
+import { generateImage } from "../imageGen.js";
 
 // Article repository (#6): every optimization is stored, keyed by source URL, so
 // re-optimizing the same article OVERWRITES the previous version (latest only —
@@ -233,7 +234,7 @@ async function doOptimize(){
     const d=await r.json(); if(!r.ok)throw new Error(d.error||"failed");
     $("#status").innerHTML="";
     $("#out").innerHTML='<div class="step">Step 3 · Optimized result</div>'+renderResult(d);
-    bindCopies(); bindFigDownloads(); bindWixCopy(); bindSeoRecs();
+    bindCopies(); bindFigDownloads(); bindFigRegen(); bindWixCopy(); bindSeoRecs();
     $("#out").scrollIntoView({behavior:"smooth",block:"start"});
   }catch(e){$("#status").className="status err";$("#status").textContent=e.message;}
   finally{$("#gen").disabled=false;}
@@ -377,20 +378,22 @@ function renderResult(d){
   }
   // Recommended figures (machine-readable) — only when the source had no images
   if((c.imageSuggestions||[]).length){
-    h+='<div class="card full"><h3>Generated figures (inline SVG, machine-readable)</h3>'+
-       '<p class="hint" style="margin:.2rem 0 .6rem">The source had no images, so these inline-SVG figures were generated and embedded in the optimized article (under their section) as &lt;figure&gt; blocks — visible here and in the copied Markdown, and parseable by search engines and AI (they carry a title, description, and alt text). Want a richer photographic graphic instead? Use each figure&rsquo;s generation prompt in your image tool and swap it in.</p>';
+    h+='<div class="card full"><h3>Generated figures</h3>'+
+       '<p class="hint" style="margin:.2rem 0 .6rem">The source had no images, so these figures were generated and embedded in the optimized article (under their section) as &lt;figure&gt; blocks with alt text + captions. If you do not like one, hit <b>Re-generate image</b> for a fresh take. Download to save it, then Insert → Image in Wix.</p>';
     c.imageSuggestions.forEach((s,fi)=>{
+      const vis=s.image?('<img src="'+esc(s.image)+'" alt="'+esc(s.alt)+'" style="width:100%;height:auto;border-radius:14px">'):(s.svg||"");
       h+='<figure style="margin:1rem 0 1.3rem">'+
-         '<div style="max-width:560px">'+(s.svg||"")+'</div>'+
+         '<div style="max-width:560px" id="figvis-'+fi+'">'+vis+'</div>'+
          '<figcaption class="hint" style="margin:.4rem 0 .4rem">'+esc(s.caption)+'</figcaption>'+
-         '<div style="display:flex;gap:.5rem;margin:.2rem 0 .5rem">'+
+         '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.2rem 0 .5rem">'+
+           '<button class="copy figregen" data-fig="'+fi+'">Re-generate image</button>'+
            '<button class="copy figdl" data-fig="'+fi+'" data-kind="png">Download PNG</button>'+
            '<button class="copy figdl" data-fig="'+fi+'" data-kind="svg">Download SVG</button>'+
          '</div>'+
          '<div class="meta">'+
          '<div class="metarow"><span class="metak">Alt text</span><span class="metav">'+esc(s.alt)+'</span></div>'+
          '<div class="metarow"><span class="metak">Section</span><span class="metav">'+esc(s.section||"")+'</span></div>'+
-         '<div class="metarow"><span class="metak">Generation prompt (for a richer graphic)</span><span class="metav">'+esc(s.prompt)+'</span></div>'+
+         '<div class="metarow"><span class="metak">Generation prompt</span><span class="metav">'+esc(s.prompt)+'</span></div>'+
          '</div></figure>';
     });
     h+='</div>';
@@ -510,11 +513,26 @@ function svgToPng(svg,filename){
   img.src=url;
 }
 function bindFigDownloads(){
-  document.querySelectorAll(".figdl").forEach(b=>b.onclick=()=>{
-    const f=FIGS[+b.dataset.fig]; if(!f||!f.svg)return;
-    if(b.dataset.kind==="svg") downloadBlob(new Blob([f.svg],{type:"image/svg+xml;charset=utf-8"}),"figure-"+(+b.dataset.fig+1)+".svg");
-    else svgToPng(f.svg,"figure-"+(+b.dataset.fig+1)+".png");
+  document.querySelectorAll(".figdl").forEach(b=>b.onclick=async()=>{
+    const i=+b.dataset.fig, f=FIGS[i]; if(!f)return;
+    if(b.dataset.kind==="svg"){ if(f.svg) downloadBlob(new Blob([f.svg],{type:"image/svg+xml;charset=utf-8"}),"figure-"+(i+1)+".svg"); }
+    else if(f.image){ try{ const bl=await (await fetch(f.image)).blob(); downloadBlob(bl,"figure-"+(i+1)+".png"); }catch(e){ alert("Download failed."); } }
+    else if(f.svg){ svgToPng(f.svg,"figure-"+(i+1)+".png"); }
     const o=b.textContent;b.textContent="Saved ✓";setTimeout(()=>b.textContent=o,1200);
+  });
+}
+function bindFigRegen(){
+  document.querySelectorAll(".figregen").forEach(b=>b.onclick=async()=>{
+    const i=+b.dataset.fig, f=FIGS[i]; if(!f)return;
+    const o=b.textContent; b.textContent="Generating…"; b.disabled=true;
+    try{
+      const r=await fetch("/api/regenerate-image",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({prompt:f.prompt})});
+      const d=await r.json();
+      if(!r.ok||!d.image) throw new Error(d.error||"failed");
+      f.image=d.image;
+      const vis=$("#figvis-"+i); if(vis) vis.innerHTML='<img src="'+d.image+'" alt="'+esc(f.alt||"")+'" style="width:100%;height:auto;border-radius:14px">';
+    }catch(e){ alert("Could not re-generate image: "+e.message); }
+    finally{ b.textContent=o; b.disabled=false; }
   });
 }
 async function bootView(id){
@@ -525,7 +543,7 @@ async function bootView(id){
     if(!r.ok||d.error) throw new Error(d.error||"Not found");
     $("#status").innerHTML="";
     $("#out").innerHTML='<div class="step">Saved optimized article</div>'+renderResult(d);
-    bindCopies(); bindFigDownloads(); bindWixCopy(); bindSeoRecs();
+    bindCopies(); bindFigDownloads(); bindFigRegen(); bindWixCopy(); bindSeoRecs();
   }catch(e){ $("#status").className="status err"; $("#status").textContent="Could not load saved article: "+e.message; }
 }
 </script></body></html>`;
@@ -613,7 +631,13 @@ app.post("/api/optimize", async (req, res) => {
   try {
     const result = await optimize(url, createProvider(), { answers });
     clearTimeout(timeout);
-    await saveResult(url, result); // store in the repository (overwrites the prior version of this URL)
+    // Store a lightweight copy: strip heavy base64 images (keep the SVG fallback +
+    // prompt) so the durable store stays small; the live response keeps the images.
+    const imgs = result.content?.imageSuggestions;
+    const stored = imgs
+      ? { ...result, content: { ...result.content, imageSuggestions: imgs.map((s) => ({ ...s, image: undefined })) } }
+      : result;
+    await saveResult(url, stored); // repository (overwrites the prior version of this URL)
     if (!res.headersSent) res.json({ ...result, savedUrl: "/r/" + resultIdFor(url) });
   } catch (err) {
     clearTimeout(timeout);
@@ -642,6 +666,25 @@ app.post("/api/suggest", async (req, res) => {
     res.json({ suggestions });
   } catch {
     res.json({ suggestions: {} }); // non-fatal — interview just stays blank
+  }
+});
+
+// #2 — re-generate a single figure image on demand (Re-generate button).
+app.post("/api/regenerate-image", async (req, res) => {
+  const prompt = (req.body?.prompt ?? "").toString().trim();
+  if (!prompt) {
+    res.status(400).json({ error: "missing prompt" });
+    return;
+  }
+  try {
+    const image = await generateImage(prompt);
+    if (!image) {
+      res.status(503).json({ error: "Image generation isn't enabled — set IMAGE_API + the provider key." });
+      return;
+    }
+    res.json({ image });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
 

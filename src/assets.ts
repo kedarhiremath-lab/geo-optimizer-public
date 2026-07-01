@@ -106,9 +106,11 @@ export function figureSvg(s: ImageSuggestion): string {
   ].join("\n");
 }
 
-/** A machine-readable HTML figure: inline SVG (visible) + parseable caption. */
+/** A machine-readable HTML figure: real AI image if present, else inline SVG. */
 export function figureBlock(s: ImageSuggestion): string {
-  const visual = s.svg || figureSvg(s);
+  const visual = s.image
+    ? `  <img src="${escAttr(s.image)}" alt="${escAttr(s.alt)}" style="max-width:100%;height:auto" />`
+    : s.svg || figureSvg(s);
   return ["<figure>", visual, `  <figcaption>${escHtml(s.caption)}</figcaption>`, "</figure>"].join("\n");
 }
 
