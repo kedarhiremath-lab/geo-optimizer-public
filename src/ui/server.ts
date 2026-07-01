@@ -168,7 +168,7 @@ async function doAnalyze(){
   const url=$("#url").value.trim(); if(!url)return;
   CTX.url=url;
   $("#analyze").disabled=true; $("#status").className="status";
-  $("#status").innerHTML='<span class="spinner"></span>Scoring the post and drafting suggested answers…';
+  $("#status").innerHTML='<span class="spinner"></span>Scoring the post…';
   $("#baseline").innerHTML=""; $("#interview").innerHTML=""; $("#out").innerHTML="";
   try{
     const r=await fetch("/api/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url})});
@@ -177,11 +177,27 @@ async function doAnalyze(){
     CTX.provider=d.provider||"the configured model";
     $("#status").innerHTML="";
     $("#baseline").innerHTML=renderBaseline(d);
-    $("#interview").innerHTML=renderInterview(d.lenses,d.suggestions||{});
+    $("#interview").innerHTML=renderInterview(d.lenses,{});
     $("#gen").onclick=doOptimize;
     const skip=$("#gen-skip"); if(skip) skip.onclick=doOptimize;
+    loadSuggestions(url); // draft interview answers in the background — does not block
   }catch(e){$("#status").className="status err";$("#status").textContent=e.message;}
   finally{$("#analyze").disabled=false;}
+}
+
+// Fetch AI-suggested interview answers AFTER the baseline is shown, then fill any
+// field the user has not already typed into. Runs in the background so the score
+// appears immediately; if the user analyzes a different URL meanwhile, we bail.
+async function loadSuggestions(url){
+  const note=$("#suggest-note"); if(note) note.textContent="Drafting suggested answers…";
+  try{
+    const r=await fetch("/api/suggest",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url})});
+    const d=await r.json(); const s=(d&&d.suggestions)||{};
+    if(CTX.url!==url) return;
+    let n=0;
+    for(const id in s){ const el=document.getElementById(id); if(el&&!el.value.trim()){ el.value=s[id]; n++; } }
+    if(note) note.textContent = n ? "Suggested answers filled in — edit them freely." : "";
+  }catch(e){ if(note) note.textContent=""; }
 }
 
 function renderBaseline(d){
@@ -198,7 +214,7 @@ function renderInterview(lenses,suggestions){
   suggestions=suggestions||{};
   let h='<div class="step">Step 2 · Skills interview <span style="color:var(--accent);font-weight:600">(optional — but it makes the rewrite sharper)</span></div>';
   h+='<div class="card full"><p class="hint" style="margin:.1rem 0 1rem"><b>Optional.</b> You can skip this entirely and still get a full GEO-optimized article. Included is suggested answers to sharpen the GEO result, which you can edit and add to. Each section maps to a gstack expert lens.</p>'+
-     '<div style="margin:0 0 1rem"><button id="gen-skip" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:.5rem 1rem;font-weight:600;border-radius:8px;cursor:pointer">Skip — optimize without answers</button></div>';
+     '<div style="margin:0 0 1rem"><button id="gen-skip" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:.5rem 1rem;font-weight:600;border-radius:8px;cursor:pointer">Skip — optimize without answers</button> <span id="suggest-note" class="hint" style="margin-left:.6rem"></span></div>';
   for(const lens of lenses){
     h+='<div class="lens"><div class="lenshead"><span class="lensname">'+esc(lens.label)+
        '</span><span class="skilltag">/'+esc(lens.skill)+'</span></div>'+
@@ -602,16 +618,12 @@ app.post("/api/analyze", async (req, res) => {
     if (!res.headersSent) res.status(504).json({ error: "Analyze timed out (>150s). Try again or check the URL." });
   }, 150_000);
   try {
+    // Return the baseline score + gaps as soon as they're ready (render + scoring).
+    // The interview suggestions are drafted by a separate /api/suggest call the
+    // client fires right after, so the score is NOT blocked behind an LLM call.
     const a = await analyze(url);
-    // #3: draft suggested interview answers now, so the interview renders pre-filled.
-    let suggestions: Record<string, string> = {};
-    try {
-      suggestions = await suggestInterviewAnswers(url, createProvider());
-    } catch {
-      /* non-fatal — interview just renders with empty (placeholder) fields */
-    }
     clearTimeout(timeout);
-    if (!res.headersSent) res.json({ ...a, lenses: INTERVIEW_LENSES, provider: providerLabel(), suggestions });
+    if (!res.headersSent) res.json({ ...a, lenses: INTERVIEW_LENSES, provider: providerLabel() });
   } catch (err) {
     clearTimeout(timeout);
     if (!res.headersSent) res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
