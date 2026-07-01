@@ -626,8 +626,8 @@ app.post("/api/optimize", async (req, res) => {
     return;
   }
   const timeout = setTimeout(() => {
-    if (!res.headersSent) res.status(504).json({ error: "Optimization timed out (>3min). Try again." });
-  }, 180_000);
+    if (!res.headersSent) res.status(504).json({ error: "Optimization timed out (>5min). Try again." });
+  }, 300_000);
   try {
     const result = await optimize(url, createProvider(), { answers });
     clearTimeout(timeout);

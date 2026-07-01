@@ -230,15 +230,21 @@ export async function optimize(
   // Extract original headings BEFORE the LLM runs — used to restore them after.
   const originalHeadings = extractHeadings(article.content);
 
-  // Two calls (reliability): the article BODY as plain Markdown, then the small
+  // Two calls (reliability): the article BODY as plain Markdown, and the small
   // structured fields as JSON. Embedding the big article in JSON intermittently
-  // broke parsing (unescaped quotes/newlines), so we keep them separate.
-  const bodyRaw = await provider.complete(articleBodyPrompt(article, config, fixList, opts.answers));
+  // broke parsing (unescaped quotes/newlines), so we keep them separate. They're
+  // INDEPENDENT (meta doesn't consume the body), so run them CONCURRENTLY — this
+  // overlaps the two slowest calls and roughly halves the rewrite latency (which
+  // was pushing long articles past the request timeout).
+  const [bodyRaw, metaRaw] = await Promise.all([
+    provider.complete(articleBodyPrompt(article, config, fixList, opts.answers)),
+    provider.complete(structuredMetaPrompt(article, config, opts.answers), { json: true }),
+  ]);
   // Code-enforced heading restoration: replace any headings the model renamed with
   // the original author's headings, in document order. This is guaranteed regardless
   // of whether the model followed the prompt instruction.
   const restoredBody = restoreOriginalHeadings(stripCodeFences(bodyRaw), originalHeadings);
-  const meta = parseOptimizedMeta(await provider.complete(structuredMetaPrompt(article, config, opts.answers), { json: true }));
+  const meta = parseOptimizedMeta(metaRaw);
   const draft = assembleContent(restoredBody, meta);
   // Metadata fallback: if the model returned empty title/description, derive
   // them from the article so the meta signal isn't lost (grounded, not invented).
@@ -273,6 +279,10 @@ export async function optimize(
   const composed = composeArticle(content, article.title, config.primaryQueries[0]);
   const deduped = dedupeTitle(composed, article.title);
   const fullArticle = deduped.md;
+
+  // Kick off the fact-preservation claim-diff (an LLM call) NOW so it runs
+  // concurrently with image generation below, instead of sequentially after it.
+  const diffPromise = claimDiff(provider, article.text, fullArticle);
 
   // Visual + downloadable assets (#1, #3). If the source has no images, generate
   // 2 machine-readable figures for the first sections; always preserve any
@@ -315,7 +325,7 @@ export async function optimize(
   }
   content.assetRecommendations = [...assetRecs, ...content.assetRecommendations];
 
-  const diff = await claimDiff(provider, article.text, fullArticle);
+  const diff = await diffPromise;
   const { schemas, notes, articleValid } = buildSchemas(article, content);
   const optimizedScore = scoreOptimized(fullArticle, scoredBase, config, {
     faqCount: content.faq.length,
