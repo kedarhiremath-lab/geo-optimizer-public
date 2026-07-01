@@ -21,33 +21,67 @@ export function imageProviderName(): string {
   return "none (inline SVG)";
 }
 
+// Trossen Robotics' ACTUAL arm aesthetic — injected whenever a generated image
+// depicts a robotic arm, so the model renders THEIR hardware instead of the
+// generic white/grey industrial cobot it defaults to. Describes the real arms:
+// matte-black, 3D-printed carbon-fiber-textured links with truss/lattice cut-outs,
+// black servo joints, a black parallel gripper on a linear rail, TROSSEN wordmark.
+const TROSSEN_ARM =
+  "TROSSEN ARM — match this exactly when a robotic arm appears: a matte-black research " +
+  "robotic arm whose links are 3D-printed with a carbon-fiber texture and visible triangular " +
+  "truss/lattice cut-outs and exposed hex bolts; chunky black servo actuators at every joint; " +
+  "a black two-finger parallel gripper; mounted on a black linear rail on a light maple-wood " +
+  "workbench in a real robotics lab. The white 'TROSSEN' wordmark is clearly printed on the " +
+  "side of the largest link. This is NOT a smooth white or grey industrial cobot — it is a " +
+  "rugged, black, 3D-printed research arm.";
+
+// Does the described subject involve a robotic arm? (Then force the Trossen look.)
+function looksLikeArm(s: string): boolean {
+  return /\b(arm|robot|gripper|manipulator|end[-\s]?effector|actuator|joint|servo|payload|cobot)\b/i.test(s);
+}
+
 /**
- * Style wrapper every image prompt passes through. Produces AI-forward, high-
- * production visuals (NOT flat clipart), in one of three formats — a photoreal
- * image, a polished graphic/infographic, or a data graph — and enforces the two
- * things models get wrong: composition (nothing cut off) and legible text.
+ * Style wrapper every image prompt passes through. Forces AI-REALISTIC, real-
+ * photograph-quality visuals (never clipart/cartoon/generic-cobot), in one of
+ * three formats — a photoreal image, a polished graphic, or a data graph — and
+ * enforces the things the model gets wrong: composition (nothing cut off),
+ * legible non-garbled text, and rendering Trossen's actual arm when one appears.
  */
 function stylePrompt(prompt: string, kind = "image"): string {
   const k = (kind || "image").toLowerCase();
-  let kindStyle: string;
-  if (k === "graph")
-    kindStyle =
-      "FORMAT — DATA GRAPH: render a clean, professional data chart (bar, line, or similar) that visualizes the described data. Axis titles and category labels must be correctly spelled, legible, and fully inside the frame.";
-  else if (k === "graphic")
-    kindStyle =
-      "FORMAT — GRAPHIC/INFOGRAPHIC: render a polished, modern, high-production graphic — depth, subtle gradients, refined iconography, magazine quality. NOT flat clipart, NOT a simple cartoon.";
-  else
-    kindStyle =
-      "FORMAT — PHOTOREALISTIC IMAGE: render a high-fidelity, studio-quality photograph or realistic 3D render. Cinematic lighting, real materials and textures, sharp detail. NOT an illustration, NOT clipart.";
-  return (
-    `${prompt}\n\n` +
-    "STYLE: modern, premium, AI-forward visual for a robotics/AI company blog — high production value.\n" +
-    kindStyle +
-    "\nCOMPOSITION: keep the entire subject AND any text fully inside the frame with generous margins on all " +
-    "sides — nothing cropped, cut off, zoomed past, or running off the edges; centered and balanced.\n" +
-    "TEXT: any words in the image must be minimal (roughly 0-6 words), correctly spelled, large, and fully " +
-    "legible well inside the frame — never clipped at an edge. No watermarks."
+  const arm = looksLikeArm(prompt);
+  const parts: string[] = [prompt, ""];
+  if (k === "graph") {
+    parts.push(
+      "FORMAT — DATA GRAPH: a clean, modern, professional data chart (bar or line) on a dark " +
+        "background that visualizes the described numbers. Keep labels to a few short, correctly-" +
+        "spelled words; axis titles and category labels fully inside the frame.",
+    );
+  } else if (k === "graphic") {
+    parts.push(
+      "FORMAT — GRAPHIC: a polished, high-production, PHOTOREALISTIC graphic — real materials, " +
+        "depth, cinematic lighting, magazine quality. NOT flat clipart, NOT a cartoon, NOT a line " +
+        "drawing. Do NOT add callout labels (small text renders garbled) — let the caption explain " +
+        "it; at most 0-3 short, correctly-spelled words.",
+    );
+    if (arm) parts.push(TROSSEN_ARM);
+  } else {
+    parts.push(
+      "FORMAT — PHOTOREALISTIC IMAGE: a real, high-fidelity DSLR-style PHOTOGRAPH — true-to-life " +
+        "materials, textures, reflections and shadows, shallow depth of field, natural lab lighting. " +
+        "It must look like a real photo shot in a robotics lab — NOT a 3D cartoon, NOT clipart, NOT a " +
+        "stock illustration, NOT a clean studio render on a plain grey gradient.",
+    );
+    if (arm) parts.push(TROSSEN_ARM);
+  }
+  parts.push(
+    "STYLE: premium, AI-realistic visual for the Trossen Robotics blog — maximum realism and production value.",
+    "COMPOSITION: keep the entire subject and any text fully inside the frame with generous margins on " +
+      "all sides — nothing cropped, cut off, or running off the edges; centered and balanced.",
+    "TEXT: any words must be minimal, large, correctly spelled, and fully legible inside the frame (the " +
+      "only long word allowed is the 'TROSSEN' logo). No garbled or misspelled text, no watermarks.",
   );
+  return parts.join("\n");
 }
 
 async function viaOpenAI(prompt: string, kind: string): Promise<string | null> {
