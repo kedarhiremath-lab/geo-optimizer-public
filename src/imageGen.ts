@@ -21,12 +21,22 @@ export function imageProviderName(): string {
   return "none (inline SVG)";
 }
 
-/** A concise style wrapper so figures look on-brand and editorial, not stocky. */
+/**
+ * Style wrapper every image prompt passes through. Enforces the two things AI
+ * image models get wrong: (1) NO text — models misspell and clip words; (2)
+ * composition — keep the whole subject inside the frame with margins so nothing
+ * is cut off at the edges.
+ */
 function stylePrompt(prompt: string): string {
   return (
     `${prompt}\n\n` +
-    "Style: clean, modern, professional editorial illustration for a robotics/AI company blog. " +
-    "Cohesive palette, technical but approachable, no text or captions in the image, no logos, no watermarks."
+    "STYLE: clean, modern, professional editorial illustration for a robotics/AI company blog; " +
+    "cohesive muted palette; technical but approachable; flat vector look.\n" +
+    "COMPOSITION: the entire subject sits fully inside the frame with generous margins on ALL sides — " +
+    "nothing cropped, cut off, zoomed-in, or touching the edges; centered and balanced; single clear focal subject.\n" +
+    "STRICT — NO TEXT: the image must contain absolutely no text, words, letters, numbers, labels, captions, " +
+    "titles, callouts, annotations, watermarks, or logos of any kind. It is a purely visual illustration — " +
+    "zero typography. (Text is described separately in the alt/caption, never rendered in the image.)"
   );
 }
 
