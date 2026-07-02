@@ -9,7 +9,7 @@
 // To enable durable storage, set these env vars (from a free Upstash Redis DB):
 //   UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -22,9 +22,29 @@ export function repoIsDurable(): boolean {
   return DURABLE;
 }
 
-/** Stable id for a source URL (re-optimizing the same URL overwrites — latest only). */
+/**
+ * Canonical form of a source URL for dedup keying. Two links to the SAME article
+ * must map to ONE key so re-optimizing overwrites instead of creating a duplicate.
+ * We drop the query string (tracking params like ?utm_source/&utm_medium/gclid are
+ * the usual culprit) and the hash, lowercase the host, strip a leading "www." and
+ * any trailing slash. The article is identified by origin + path.
+ */
+export function canonicalizeUrl(raw: string): string {
+  try {
+    const u = new URL(raw.trim());
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    let path = u.pathname.replace(/\/+$/, "");
+    if (!path) path = "/";
+    return u.protocol.toLowerCase() + "//" + host + path;
+  } catch {
+    return raw.trim().toLowerCase();
+  }
+}
+
+/** Stable id for a source URL (re-optimizing the same article overwrites — latest
+ * only). Keyed by the CANONICAL url, so tracking params never split into dupes. */
 export function resultIdFor(url: string): string {
-  return createHash("sha256").update(url).digest("hex").slice(0, 16);
+  return createHash("sha256").update(canonicalizeUrl(url)).digest("hex").slice(0, 16);
 }
 
 export interface RepoEntry {
@@ -112,6 +132,73 @@ export async function loadResultById(id: string): Promise<unknown | null> {
 
 export function loadResultByUrl(url: string): Promise<unknown | null> {
   return loadResultById(resultIdFor(url));
+}
+
+/** Delete one stored result (both its metadata and body). Best-effort. */
+export async function deleteResult(id: string): Promise<void> {
+  if (DURABLE) {
+    try {
+      await upstash([["HDEL", "geo:meta", id], ["DEL", "geo:result:" + id]]);
+      return;
+    } catch {
+      /* fall through to file */
+    }
+  }
+  try {
+    const p = join(DIR, id + ".json");
+    if (existsSync(p)) unlinkSync(p);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Low-level write of an entry under an explicit id, preserving its savedAt
+ * (used by the dedup migration to re-key a survivor under the canonical id). */
+async function putEntry(id: string, meta: Omit<RepoEntry, "id">, result: unknown): Promise<void> {
+  if (DURABLE) {
+    await upstash([
+      ["HSET", "geo:meta", id, JSON.stringify({ url: meta.url, title: meta.title, score: meta.score, savedAt: meta.savedAt })],
+      ["SET", "geo:result:" + id, JSON.stringify(result)],
+    ]);
+    return;
+  }
+  fileSave(id, result);
+}
+
+/**
+ * One-time repository cleanup (idempotent). Collapses legacy duplicates — the same
+ * article saved under different URLs (e.g. differing ?utm_* tracking params) — by
+ * grouping on the CANONICAL url, keeping the newest, deleting the rest, and
+ * re-keying the survivor under the canonical id so future re-optimizes overwrite.
+ * Safe to run on every boot: once each article is single + canonical, it's a no-op.
+ */
+export async function dedupRepo(): Promise<{ removed: number; rekeyed: number }> {
+  const entries = await listResults(); // sorted newest-first
+  const groups = new Map<string, RepoEntry[]>();
+  for (const e of entries) {
+    const canon = resultIdFor(e.url);
+    const arr = groups.get(canon);
+    if (arr) arr.push(e);
+    else groups.set(canon, [e]);
+  }
+  let removed = 0;
+  let rekeyed = 0;
+  for (const [canonId, list] of groups) {
+    const keep = list[0]; // newest (listResults is newest-first)
+    for (let i = 1; i < list.length; i++) {
+      await deleteResult(list[i].id);
+      removed++;
+    }
+    if (keep.id !== canonId) {
+      const full = await loadResultById(keep.id);
+      if (full) {
+        await putEntry(canonId, { url: keep.url, title: keep.title, score: keep.score, savedAt: keep.savedAt }, full);
+        await deleteResult(keep.id);
+        rekeyed++;
+      }
+    }
+  }
+  return { removed, rekeyed };
 }
 
 export async function listResults(): Promise<RepoEntry[]> {

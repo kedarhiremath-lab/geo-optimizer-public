@@ -9,7 +9,7 @@ import { analyze, optimize, suggestInterviewAnswers } from "../optimize.js";
 import { createProvider } from "../llm.js";
 import { INTERVIEW_LENSES } from "../interview.js";
 import { getLearnings, addLearnings, clearLearnings } from "../learnings.js";
-import { saveResult, loadResultById, loadResultByUrl, listResults, resultIdFor, repoIsDurable } from "../repo.js";
+import { saveResult, loadResultById, loadResultByUrl, listResults, resultIdFor, repoIsDurable, dedupRepo } from "../repo.js";
 import { figureSvg } from "../assets.js";
 
 // Article repository (#6): every optimization is stored, keyed by source URL, so
@@ -26,6 +26,15 @@ function loadEnv(): void {
   }
 }
 loadEnv();
+
+// One-time repository cleanup on boot (idempotent): collapse any legacy duplicates
+// — the same article saved under different tracking-param URLs — keeping the newest
+// and re-keying it under the canonical URL. See dedupRepo() in repo.ts.
+dedupRepo()
+  .then((r) => {
+    if (r.removed || r.rekeyed) console.log(`[repo] dedup on boot: removed ${r.removed} duplicate(s), re-keyed ${r.rekeyed}`);
+  })
+  .catch(() => {});
 
 const app = express();
 
