@@ -31,9 +31,8 @@ const TROSSEN_ARM =
   "robotic arm whose links are 3D-printed with a carbon-fiber texture and visible triangular " +
   "truss/lattice cut-outs and exposed hex bolts; chunky black servo actuators at every joint; " +
   "a black two-finger parallel gripper; mounted on a black linear rail on a light maple-wood " +
-  "workbench in a real robotics lab. The white 'TROSSEN' wordmark is clearly printed on the " +
-  "side of the largest link. This is NOT a smooth white or grey industrial cobot — it is a " +
-  "rugged, black, 3D-printed research arm.";
+  "workbench in a real robotics lab. This is NOT a smooth white or grey industrial cobot — it is a " +
+  "rugged, black, 3D-printed research arm. Do NOT print any logo, wordmark, brand name, or text on it.";
 
 // Does the described subject involve a robotic arm? (Then force the Trossen look.)
 function looksLikeArm(s: string): boolean {
@@ -41,45 +40,33 @@ function looksLikeArm(s: string): boolean {
 }
 
 /**
- * Style wrapper every image prompt passes through. Forces AI-REALISTIC, real-
- * photograph-quality visuals (never clipart/cartoon/generic-cobot), in one of
- * three formats — a photoreal image, a polished graphic, or a data graph — and
- * enforces the things the model gets wrong: composition (nothing cut off),
- * legible non-garbled text, and rendering Trossen's actual arm when one appears.
+ * Style wrapper every image prompt passes through. PHOTO-FIRST and TEXT-FREE:
+ * image models render text as garbled nonsense and struggle with infographics, so
+ * we force a single format — a realistic robotics-lab PHOTOGRAPH with NO text of
+ * any kind (titles, labels, logos, wordmarks, on-screen UI). Any words live in the
+ * on-page caption instead. Data charts ("graph") are handled upstream as crisp SVGs
+ * and never reach this function.
  */
-function stylePrompt(prompt: string, kind = "image"): string {
-  const k = (kind || "image").toLowerCase();
+function stylePrompt(prompt: string, _kind = "image"): string {
   const arm = looksLikeArm(prompt);
-  const parts: string[] = [prompt, ""];
-  if (k === "graph") {
-    parts.push(
-      "FORMAT — DATA GRAPH: a clean, modern, professional data chart (bar or line) on a dark " +
-        "background that visualizes the described numbers. Keep labels to a few short, correctly-" +
-        "spelled words; axis titles and category labels fully inside the frame.",
-    );
-  } else if (k === "graphic") {
-    parts.push(
-      "FORMAT — GRAPHIC: a polished, high-production, PHOTOREALISTIC graphic — real materials, " +
-        "depth, cinematic lighting, magazine quality. NOT flat clipart, NOT a cartoon, NOT a line " +
-        "drawing. Do NOT add callout labels (small text renders garbled) — let the caption explain " +
-        "it; at most 0-3 short, correctly-spelled words.",
-    );
-    if (arm) parts.push(TROSSEN_ARM);
-  } else {
-    parts.push(
-      "FORMAT — PHOTOREALISTIC IMAGE: a real, high-fidelity DSLR-style PHOTOGRAPH — true-to-life " +
-        "materials, textures, reflections and shadows, shallow depth of field, natural lab lighting. " +
-        "It must look like a real photo shot in a robotics lab — NOT a 3D cartoon, NOT clipart, NOT a " +
-        "stock illustration, NOT a clean studio render on a plain grey gradient.",
-    );
-    if (arm) parts.push(TROSSEN_ARM);
-  }
+  const parts: string[] = [
+    prompt,
+    "",
+    "FORMAT — PHOTOREALISTIC PHOTOGRAPH: a real, high-fidelity DSLR-style photograph — true-to-life " +
+      "materials, textures, reflections and shadows, shallow depth of field, natural robotics-lab " +
+      "lighting. It must look like a genuine photo shot in a robotics lab — NOT a 3D cartoon, clipart, " +
+      "stock illustration, infographic, diagram, chart, or clean studio render on a plain gradient.",
+  ];
+  if (arm) parts.push(TROSSEN_ARM);
   parts.push(
-    "STYLE: premium, AI-realistic visual for the Trossen Robotics blog — maximum realism and production value.",
-    "COMPOSITION: keep the entire subject and any text fully inside the frame with generous margins on " +
-      "all sides — nothing cropped, cut off, or running off the edges; centered and balanced.",
-    "TEXT: any words must be minimal, large, correctly spelled, and fully legible inside the frame (the " +
-      "only long word allowed is the 'TROSSEN' logo). No garbled or misspelled text, no watermarks.",
+    "CRITICAL — ABSOLUTELY NO TEXT: the image must contain NO text, letters, numbers, words, titles, " +
+      "headings, captions, labels, callouts, signage, logos, wordmarks, watermarks, or readable screens " +
+      "of ANY kind. It is a purely visual photograph. (Image models render text as garbled nonsense, so " +
+      "any text ruins the image.) If a monitor or screen appears, keep it OFF, blank, or softly blurred " +
+      "with no legible content.",
+    "STYLE: premium, photorealistic editorial photography for a robotics blog — maximum realism, depth, and production value.",
+    "COMPOSITION: keep the entire subject fully inside the frame with generous margins on all sides — " +
+      "nothing cropped, cut off, or running off the edges; centered and balanced.",
   );
   return parts.join("\n");
 }

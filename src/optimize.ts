@@ -280,6 +280,9 @@ export async function optimize(
   if (imageGenAvailable()) {
     await Promise.all(
       figures.map(async (f) => {
+        // Data charts stay as crisp SVGs (real numbers, correct labels); image
+        // models garble both. Everything else becomes a text-free photograph.
+        if ((f.kind || "image") === "graph") return;
         const img = await generateImage(f.prompt, f.kind || "image");
         if (img) f.image = img;
       }),

@@ -271,9 +271,9 @@ export function pickFigures(
         ? { ...pick, section } // anchor the model's figure to the real heading text
         : {
             section,
-            alt: `Diagram illustrating "${section}".`,
+            alt: `Photo illustrating "${section}".`,
             caption: section,
-            prompt: `A clean, professional editorial diagram for a robotics article section titled "${section}". Minimal, technical, on-brand; no text-heavy clutter.`,
+            prompt: `A realistic photograph of a real robotics-lab scene that visually conveys the topic of ${section}. True materials, natural lighting, shallow depth of field. Absolutely no text, words, titles, labels, or logos anywhere in the image.`,
           },
     );
   }
