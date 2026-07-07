@@ -23,6 +23,7 @@ function asStringArray(v: unknown): string[] {
 function asMetadata(v: unknown): Metadata {
   const o = (v ?? {}) as Record<string, unknown>;
   return {
+    headline: typeof o.headline === "string" ? o.headline : "",
     title: typeof o.title === "string" ? o.title : "",
     metaDescription: typeof o.metaDescription === "string" ? o.metaDescription : "",
     slug: typeof o.slug === "string" ? o.slug : "",
@@ -94,8 +95,8 @@ export function assembleContent(articleMarkdown: string, meta: OptimizedMeta): O
  */
 export function composeArticle(content: OptimizedContent, title: string, leadQuery?: string): string {
   const out: string[] = [];
-  // TITLE FIRST, ALWAYS — the original article title, preserved verbatim. Nothing
-  // is printed above it.
+  // TITLE FIRST, ALWAYS — the resolved visible H1 (the GEO-optimized headline, or
+  // the original title when unchanged). Nothing is printed above it.
   if (title) out.push(`# ${title}`);
   // Answer-first lead. PREFER the author's own opening: if the body already opens
   // on-topic (covers most of the primary query's words in its first lines), use

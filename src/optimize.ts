@@ -7,7 +7,8 @@ import { extractArticle } from "./extract.js";
 import { scoreOriginal, buildFixList, scoreOptimized, topicOverlap, countStats, explainScore, articleFromMarkdown } from "./score.js";
 import { computeReadability, editorialChangeBudget, evaluateEditorialGates, dedupeTitle, splitDenseParagraphs } from "./editorial.js";
 import { traceInterview } from "./trace.js";
-import { pickFigures, insertFigures, ensureDownloadsSection, ensureSourcesSection, figureSvg } from "./assets.js";
+import { pickFigures, insertFigures, ensureDownloadsSection, ensureSourcesSection, figureSvg, contentHeadingTexts } from "./assets.js";
+import { generateImage, imageGenAvailable } from "./imageGen.js";
 import { articleBodyPrompt, structuredMetaPrompt, interviewSuggestionsPrompt } from "./prompts.js";
 import { claimDiff } from "./claimDiff.js";
 import { buildSchemas } from "./schema.js";
@@ -74,42 +75,13 @@ function stripCodeFences(s: string): string {
   return (m ? m[1] : t).trim();
 }
 
-/**
- * Extract all headings (## or bold **text**) from a markdown string in document order.
- * Returns them as plain strings (no markdown syntax).
- */
-function extractHeadings(md: string): string[] {
-  const out: string[] = [];
-  for (const line of md.split("\n")) {
-    const h = line.match(/^#{1,3}\s+(.+)$/) || line.match(/^\*\*(.+)\*\*\s*$/);
-    if (h) out.push(h[1].trim());
-  }
-  return out;
-}
-
-/**
- * After LLM generation, restore original headings by order — the model reliably
- * keeps the same number of sections but renames them. Walk through both heading
- * lists in parallel and replace each LLM heading with the corresponding original.
- * This is code-enforced, not prompt-enforced.
- */
-function restoreOriginalHeadings(llmBody: string, originalHeadings: string[]): string {
-  if (!originalHeadings.length) return llmBody;
-  let result = llmBody;
-  let origIdx = 0;
-  // Replace each heading in the LLM output with the next original heading, in order.
-  result = result.replace(/^(#{1,3}\s+)(.+)$/gm, (_match, prefix, _text) => {
-    if (origIdx < originalHeadings.length) {
-      return prefix + originalHeadings[origIdx++];
-    }
-    return _match;
-  });
-  // Also restore bold-style titles that the model may have converted or renamed.
-  origIdx = 0;
-  // Find bold lines and restore in order (only if they were converted FROM bold in original)
-  const boldOriginals = originalHeadings; // we restore all in document order regardless of format
-  void boldOriginals; // consumed above via shared origIdx — restoration is order-based
-  return result;
+/** Absolute/superlative marketing terms that must be grounded in the source if
+ * they appear in the (now model-generated) visible headline. */
+const SUPERLATIVE_RE = /\b(first|only|fastest|best|leading|world'?s|#1|number one|guaranteed|unmatched|unrivalled|unrivaled|revolutionary)\b/gi;
+function unsupportedSuperlative(headline: string, source: string): boolean {
+  const src = source.toLowerCase();
+  const terms = headline.toLowerCase().match(SUPERLATIVE_RE) || [];
+  return terms.some((t) => !src.includes(t));
 }
 
 /**
@@ -226,9 +198,6 @@ export async function optimize(
   const scored = scoreOriginal(article, config);
   const fixList = buildFixList(scored);
 
-  // Extract original headings BEFORE the LLM runs — used to restore them after.
-  const originalHeadings = extractHeadings(article.content);
-
   // Two calls (reliability): the article BODY as plain Markdown, and the small
   // structured fields as JSON. Embedding the big article in JSON intermittently
   // broke parsing (unescaped quotes/newlines), so we keep them separate. They're
@@ -239,16 +208,26 @@ export async function optimize(
     provider.complete(articleBodyPrompt(article, config, fixList, opts.answers)),
     provider.complete(structuredMetaPrompt(article, config, opts.answers), { json: true }),
   ]);
-  // Code-enforced heading restoration: replace any headings the model renamed with
-  // the original author's headings, in document order. This is guaranteed regardless
-  // of whether the model followed the prompt instruction.
-  const restoredBody = restoreOriginalHeadings(stripCodeFences(bodyRaw), originalHeadings);
+  // Headings the model chose are kept as-is (GEO-optimized subtitles are now a
+  // feature, not a violation). We only strip a stray code fence around the body.
+  const body = stripCodeFences(bodyRaw);
   const meta = parseOptimizedMeta(metaRaw);
-  const draft = assembleContent(restoredBody, meta);
+  const draft = assembleContent(body, meta);
   // Metadata fallback: if the model returned empty title/description, derive
   // them from the article so the meta signal isn't lost (grounded, not invented).
   if (!draft.metadata.title) draft.metadata.title = article.title.slice(0, 60);
   if (!draft.metadata.metaDescription) draft.metadata.metaDescription = article.text.replace(/\s+/g, " ").slice(0, 158);
+  // The visible H1: prefer the model's optimized headline, then the SEO title,
+  // then the original title. Store the resolved value back so the schema, UI, and
+  // scoring all use the same headline.
+  let optimizedTitle = (draft.metadata.headline || draft.metadata.title || article.title).trim();
+  // Fact guardrail: never ship a fabricated superlative in the most visible line —
+  // if the model's headline adds an absolute claim ("first", "fastest", …) not in
+  // the source, fall back to the original title. (claimDiff also guards the body.)
+  if (optimizedTitle !== article.title.trim() && unsupportedSuperlative(optimizedTitle, article.text)) {
+    optimizedTitle = article.title.trim();
+  }
+  draft.metadata.headline = optimizedTitle;
   const scoredBase = { ...article, meta: { title: draft.metadata.title, description: draft.metadata.metaDescription } };
 
   // MODEL score: what the LLM produced on its own, BEFORE our deterministic
@@ -256,7 +235,7 @@ export async function optimize(
   // schema is engine-generated). This isolates raw model quality — it's the
   // number that rises with a stronger model, and the honest middle of the
   // before -> model -> fully-optimized story.
-  const modelComposed = composeArticle(draft, article.title);
+  const modelComposed = composeArticle(draft, optimizedTitle);
   const modelScore = scoreOptimized(modelComposed, scoredBase, config, {
     faqCount: draft.faq.length,
     schemaCount: 0,
@@ -275,8 +254,8 @@ export async function optimize(
   // The full publishable article (for scoring, fact-check, and copy). The lead
   // query makes the scored text open answer-first. Then strip any duplicate of
   // the title that slipped into the body (keep the first).
-  const composed = composeArticle(content, article.title, config.primaryQueries[0]);
-  const deduped = dedupeTitle(composed, article.title);
+  const composed = composeArticle(content, optimizedTitle, config.primaryQueries[0]);
+  const deduped = dedupeTitle(composed, optimizedTitle);
   const fullArticle = deduped.md;
 
   // Kick off the fact-preservation claim-diff (an LLM call) NOW so it runs
@@ -288,11 +267,24 @@ export async function optimize(
   // downloadable assets from the source. Done on a COPY so it never skews scoring
   // or the claim-diff (which run on the prose).
   const hasSourceImages = (article.images?.length ?? 0) > 0;
-  const figures = hasSourceImages ? [] : pickFigures(content.imageSuggestions ?? [], article.headings, 2, 4);
-  // Render each figure as a clean, machine-readable inline SVG (image | graphic |
-  // graph, per f.kind). Free — no image API. Users can Re-generate for a fresh
-  // palette, or Download as PNG/SVG.
+  // Anchor figures to the article's CURRENT section headings (the model may have
+  // rewritten them for GEO). Using article.headings (the original extracted ones)
+  // would fail to match the rewritten body and dump every figure at the top.
+  const figures = hasSourceImages ? [] : pickFigures(content.imageSuggestions ?? [], contentHeadingTexts(fullArticle), 2, 4);
+  // Always render an inline SVG first — it's the free, guaranteed fallback.
   figures.forEach((f) => (f.svg = figureSvg(f)));
+  // When a paid image API is configured (IMAGE_API + key), generate a REAL,
+  // photorealistic image per figure from its detailed prompt — far more
+  // representative of the section than the SVG placeholder. Runs in parallel; any
+  // failure (quota, error) silently leaves the SVG fallback in place.
+  if (imageGenAvailable()) {
+    await Promise.all(
+      figures.map(async (f) => {
+        const img = await generateImage(f.prompt, f.kind || "image");
+        if (img) f.image = img;
+      }),
+    );
+  }
   content.imageSuggestions = figures; // surface the placed figures in the UI
   let publishArticle = insertFigures(fullArticle, figures);
   publishArticle = ensureDownloadsSection(publishArticle, article.downloads ?? []);
@@ -344,26 +336,29 @@ export async function optimize(
     claimsAdded: diff.added.length,
     claimsRemoved,
     duplicateHeadingsRemoved: deduped.removed,
-    title: article.title,
+    title: optimizedTitle,
   });
   const gateResult = evaluateEditorialGates({
     origBody: article.content,
     optBody: content.articleMarkdown,
     origHeadings: article.headings,
     published: publishArticle,
-    title: article.title,
+    title: optimizedTitle,
     before,
     after,
     report: budget,
     claimDiffPassed: diff.passed,
   });
-  // Optional SEO/GEO recommendations — surfaced, NOT applied (title/subtitle
-  // preservation wins). Only include suggestions that differ from the original.
-  // NOTE: we deliberately do NOT recommend a URL slug change — changing the slug
-  // breaks existing links (user directive). The slug is shown for reference only.
+  // SEO/GEO notes. The visible headline and subtitles ARE now optimized in place;
+  // these notes surface what changed (so the author can review/revert) plus the
+  // metadata-tag suggestions. NOTE: we still do NOT change the URL slug — that
+  // breaks existing links (user directive); the slug is shown for reference only.
   const optionalSeoRecs: string[] = [];
-  if (content.metadata.title && content.metadata.title.trim() !== article.title.trim()) {
-    optionalSeoRecs.push(`Suggested SEO <title> tag: "${content.metadata.title}" (the article's visible H1 title stays unchanged).`);
+  if (optimizedTitle.trim() !== article.title.trim()) {
+    optionalSeoRecs.push(`Headline optimized for GEO: "${article.title}" → "${optimizedTitle}". (Keep the original in your CMS if you prefer it.)`);
+  }
+  if (content.metadata.title && content.metadata.title.trim() !== optimizedTitle.trim()) {
+    optionalSeoRecs.push(`Suggested SEO <title> tag (can differ from the visible headline): "${content.metadata.title}".`);
   }
   if (content.metadata.metaDescription) optionalSeoRecs.push(`Suggested meta description: "${content.metadata.metaDescription}".`);
 
@@ -399,7 +394,7 @@ export async function optimize(
 
   return {
     url,
-    title: article.title, // original title, preserved verbatim
+    title: optimizedTitle, // visible H1 — GEO-optimized when it helps, else original
     baselineScore: scored.baselineScore,
     modelScore,
     optimizedScore,

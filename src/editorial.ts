@@ -105,15 +105,24 @@ const VOICE_STOP = new Set([
  * reuse is a light secondary signal; generic-AI phrasing is penalized.
  */
 export function voicePreservationScore(orig: string, opt: string): number {
+  // Compare PROSE only. Headings are now intentionally rewritten for GEO, so a
+  // renamed/question heading must not count against the author's BODY voice.
+  const prose = (t: string) =>
+    t
+      .split("\n")
+      .filter((l) => !/^\s*#{1,6}\s+/.test(l) && !/^\s*\*\*[^*]+\*\*\s*$/.test(l))
+      .join("\n");
+  const o = prose(orig);
+  const p = prose(opt);
   const contentWords = (t: string) =>
     new Set(words(t).filter((w) => w.length >= 4 && !VOICE_STOP.has(w)));
-  const oSet = contentWords(orig);
-  const optSet = contentWords(opt);
+  const oSet = contentWords(o);
+  const optSet = contentWords(p);
   const retention = oSet.size
     ? ([...oSet].filter((w) => optSet.has(w)).length / oSet.size) * 100
     : 100;
-  const phrase = wordingPreservedPct(orig, opt); // 0-100 (3-gram reuse)
-  const generic = genericAiPhrasesFound(opt).length;
+  const phrase = wordingPreservedPct(o, p); // 0-100 (3-gram reuse), prose only
+  const generic = genericAiPhrasesFound(p).length;
   const score = retention * 0.9 + phrase * 0.1 - generic * 6;
   return Math.round(Math.max(0, Math.min(100, score)));
 }
@@ -290,20 +299,6 @@ export function editorialChangeBudget(input: EditorialBudgetInput): EditorialRep
 
 import { readingFriction, stripMarkdown } from "./readability.js";
 
-/** True if every original heading still appears in the optimized body. */
-export function subtitlesPreserved(origHeadings: string[], optBody: string, title = ""): boolean {
-  const orig = origHeadings.map(normHeading).filter((h) => h && !isExcludedHeading(h, title));
-  const opt = new Set(headingList(optBody).map(normHeading));
-  return orig.every((h) => opt.has(h));
-}
-
-/** True if the optimized body opens with the original title (verbatim, deduped). */
-export function titlePreserved(optBody: string, title: string): boolean {
-  if (!title) return true;
-  const heads = headingList(optBody).map(normHeading);
-  return heads.length > 0 && heads[0] === normHeading(title);
-}
-
 /** Basic markdown-table integrity: every pipe-table block has a separator row. */
 export function tablesWellFormed(md: string): boolean {
   const lines = md.split("\n");
@@ -352,6 +347,54 @@ export interface GateResult {
   reasons: string[];
 }
 
+/** Small connective-word set — a natural headline has at least one; a bare keyword
+ * list ("ROS 2 Robot Learning Guide Tutorial Tips Best") has none. */
+const HEADLINE_STOP = new Set([
+  "a", "an", "the", "and", "or", "for", "of", "to", "in", "on", "is", "are", "how",
+  "why", "what", "your", "you", "with", "from", "that", "this", "when", "does", "do", "can",
+]);
+
+/**
+ * The visible H1 is present and not obviously broken. This is a HARD publish gate,
+ * so it only fails on clearly-bad headlines — empty/fragment, an absurdly long
+ * paragraph-as-heading, or blatant keyword-stuffing (a word repeated 3+ times, or
+ * a long string of keywords with no connective words). Length targeting (prompt
+ * asks <=70; schema truncates 110 for Google) is guidance, NOT a publish blocker —
+ * an untouched original title that happens to be long must never block publishing.
+ */
+export function headlineWellFormed(published: string): boolean {
+  const first = (headingList(published)[0] ?? "").trim();
+  if (first.length < 3 || first.length > 160) return false; // empty/fragment or wall-of-text
+  const words = first.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  // Blatant stuffing: a long run of keywords with no connective words at all
+  // (a natural headline of this length always has an article/preposition/verb).
+  if (words.length >= 8 && !words.some((w) => HEADLINE_STOP.has(w))) return false;
+  // Blatant stuffing: the same content word hammered 3+ times.
+  const counts = new Map<string, number>();
+  for (const w of words) if (w.length >= 3 && !HEADLINE_STOP.has(w)) counts.set(w, (counts.get(w) ?? 0) + 1);
+  for (const c of counts.values()) if (c >= 3) return false;
+  return true;
+}
+
+/** Count author-content subheadings (excludes the title and structural headings like Sources/References). */
+function countAuthoredHeadings(headings: string[], title: string): number {
+  return headings.map(normHeading).filter((h) => h && !isExcludedHeading(h, title)).length;
+}
+
+/**
+ * Headings may now be freely rewritten (even into questions), so we no longer
+ * require them to match verbatim. What we DO guard against is FLATTENING: the
+ * model collapsing the author's sections and losing content. Since the engine
+ * also adds sections, the optimized body should carry at least ~60% as many
+ * content headings as the original had.
+ */
+export function sectionStructurePreserved(origHeadings: string[], optBody: string, title = ""): boolean {
+  const origCount = countAuthoredHeadings(origHeadings, title);
+  if (origCount === 0) return true;
+  const optCount = countAuthoredHeadings(headingList(optBody), title);
+  return optCount >= Math.max(1, Math.ceil(origCount * 0.6));
+}
+
 /** Evaluate the "Do Not Publish If" gate. publishReady is true only if all pass. */
 export function evaluateEditorialGates(input: GateInput): GateResult {
   const { origBody, optBody, origHeadings, published, title, before, after, report, claimDiffPassed } = input;
@@ -359,13 +402,20 @@ export function evaluateEditorialGates(input: GateInput): GateResult {
   const f1Before = first200Friction(origBody);
   const f1After = first200Friction(optBody);
 
+  const optSectionCount = countAuthoredHeadings(headingList(optBody), title);
+  const origSectionCount = countAuthoredHeadings(origHeadings, title);
   const gates: EditorialGate[] = [
-    { id: "title", label: "Title unchanged", pass: titlePreserved(published, title), detail: title },
+    {
+      id: "title",
+      label: "Headline present & well-formed",
+      pass: headlineWellFormed(published),
+      detail: headingList(published)[0] ?? "(none)",
+    },
     {
       id: "subtitles",
-      label: "Existing subtitles unchanged",
-      pass: subtitlesPreserved(origHeadings, optBody, title) && report.headingsChanged === 0,
-      detail: `${report.headingsPreserved} preserved, ${report.headingsChanged} changed`,
+      label: "Section structure preserved (not flattened)",
+      pass: sectionStructurePreserved(origHeadings, optBody, title),
+      detail: `${optSectionCount} section${optSectionCount === 1 ? "" : "s"} vs ${origSectionCount} original`,
     },
     {
       id: "dupe-title",

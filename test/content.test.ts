@@ -5,7 +5,7 @@ const goodMeta = JSON.stringify({
   shortVersion: ["Pick a narrow task", "Define success metrics"],
   whoThisIsFor: ["Ops leaders", "R&D teams"],
   faq: [{ q: "When is a demo ready?", a: "When it does useful work." }, { q: "", a: "drop me" }],
-  metadata: { title: "T", metaDescription: "D", slug: "s", tags: ["a", "b"], socialCopy: "S", imageAltText: [] },
+  metadata: { headline: "H", title: "T", metaDescription: "D", slug: "s", tags: ["a", "b"], socialCopy: "S", imageAltText: [] },
   assetRecommendations: ["Convert the scorecard to an HTML table"],
 });
 
@@ -15,6 +15,7 @@ describe("parseOptimizedMeta", () => {
     expect(m.shortVersion.length).toBe(2);
     expect(m.whoThisIsFor).toContain("Ops leaders");
     expect(m.faq.length).toBe(1); // empty-q entry dropped
+    expect(m.metadata.headline).toBe("H");
     expect(m.metadata.title).toBe("T");
     expect(m.assetRecommendations.length).toBe(1);
   });
@@ -30,6 +31,7 @@ describe("parseOptimizedMeta", () => {
   it("fills safe defaults for missing fields", () => {
     const m = parseOptimizedMeta(JSON.stringify({ shortVersion: ["x"] }));
     expect(m.faq).toEqual([]);
+    expect(m.metadata.headline).toBe("");
     expect(m.metadata.title).toBe("");
   });
 });

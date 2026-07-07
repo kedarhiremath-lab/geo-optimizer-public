@@ -39,7 +39,7 @@ async function main(): Promise<void> {
     console.log(`Reading friction: ${e.before.readingFriction} -> ${e.after.readingFriction} | cognitive load: ${e.before.cognitiveLoad} -> ${e.after.cognitiveLoad}`);
     console.log(`Reading time: ${e.before.readingTimeMin} -> ${e.after.readingTimeMin} min | avg paragraph: ${e.before.avgParagraphLength} -> ${e.after.avgParagraphLength} words`);
     console.log(`Voice preservation: ${b.voicePreservationScore}/100 | wording preserved: ${b.wordingPreservedPct}% | sentences rewritten: ${b.sentencesRewrittenPct}%`);
-    console.log(`Headings preserved/changed: ${b.headingsPreserved}/${b.headingsChanged} | dupes removed: ${b.duplicateHeadingsRemoved} | claims added/removed: ${b.claimsAdded}/${b.claimsRemoved}`);
+    console.log(`Headings kept/rewritten: ${b.headingsPreserved}/${b.headingsChanged} | dupes removed: ${b.duplicateHeadingsRemoved} | claims added/removed: ${b.claimsAdded}/${b.claimsRemoved}`);
   }
 
   if (r.scoreExplain) {
@@ -67,7 +67,8 @@ async function main(): Promise<void> {
   console.log(`\n--- Who this is for ---`);
   r.content.whoThisIsFor.forEach((s) => console.log(`   - ${s}`));
   console.log(`\n--- Metadata ---`);
-  console.log(`title: ${r.content.metadata.title}`);
+  console.log(`headline (visible H1): ${r.title}`);
+  console.log(`title tag (SEO): ${r.content.metadata.title}`);
   console.log(`description: ${r.content.metadata.metaDescription}`);
   console.log(`slug: ${r.content.metadata.slug}`);
   console.log(`tags: ${r.content.metadata.tags.join(", ")}`);

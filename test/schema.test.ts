@@ -15,7 +15,7 @@ function content(over: Partial<OptimizedContent>): OptimizedContent {
   return {
     shortVersion: ["step"], whoThisIsFor: ["ops leaders"], articleMarkdown: "## h\n\ntext",
     faq: [{ q: "How?", a: "Like this." }],
-    metadata: { title: "t", metaDescription: "d", slug: "s", tags: ["robotics"], socialCopy: "c", imageAltText: [] },
+    metadata: { headline: "h", title: "t", metaDescription: "d", slug: "s", tags: ["robotics"], socialCopy: "c", imageAltText: [] },
     assetRecommendations: [],
     ...over,
   };
@@ -31,6 +31,24 @@ describe("buildSchemas", () => {
     expect(types).toContain("BreadcrumbList");
     expect(types).toContain("FAQPage");
     expect(articleValid).toBe(true);
+  });
+
+  it("uses the optimized headline for the Article schema headline", () => {
+    const { schemas } = buildSchemas(
+      article({}),
+      content({ metadata: { headline: "How does ROS 2 power robot learning?", title: "t", metaDescription: "d", slug: "s", tags: [], socialCopy: "c", imageAltText: [] } }),
+    );
+    const art = schemas.find((s) => s["@type"] === "TechArticle") as any;
+    expect(art.headline).toBe("How does ROS 2 power robot learning?");
+  });
+
+  it("falls back to the article title when no headline is set", () => {
+    const { schemas } = buildSchemas(
+      article({ title: "Original Title" }),
+      content({ metadata: { headline: "", title: "t", metaDescription: "d", slug: "s", tags: [], socialCopy: "c", imageAltText: [] } }),
+    );
+    const art = schemas.find((s) => s["@type"] === "TechArticle") as any;
+    expect(art.headline).toBe("Original Title");
   });
 
   it("FAQPage mirrors the generated FAQ", () => {

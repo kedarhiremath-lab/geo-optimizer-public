@@ -87,6 +87,10 @@ export interface FaqItem {
 
 /** SEO/GEO metadata recommendations (#6). */
 export interface Metadata {
+  /** The VISIBLE H1 headline, optimized for GEO/clarity (may be rephrased or a
+   * question). Distinct from the SEO <title> tag. Rendered at the top of the
+   * article. Falls back to the SEO title, then the original title, when empty. */
+  headline: string; // visible H1, <= ~70 chars, in the author's voice
   title: string; // <title> tag, query-aligned, <= ~60 chars
   metaDescription: string; // ~150-160 chars
   slug: string; // url slug
@@ -190,7 +194,9 @@ export interface InterviewTraceLens {
 
 export interface OptimizeResult {
   url: string;
-  /** The ORIGINAL article title, preserved verbatim (never rewritten). Rendered first. */
+  /** The article's visible H1 title. Optimized for GEO/clarity when the engine
+   * judges it improves ranking or readability; otherwise the original title.
+   * Rendered first. */
   title: string;
   baselineScore: number;
   /** Score of the model's own rewrite, BEFORE deterministic guarantees (raw model quality). */

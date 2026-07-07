@@ -11,6 +11,7 @@ import { INTERVIEW_LENSES } from "../interview.js";
 import { getLearnings, addLearnings, clearLearnings } from "../learnings.js";
 import { saveResult, loadResultById, loadResultByUrl, listResults, resultIdFor, repoIsDurable, dedupRepo } from "../repo.js";
 import { figureSvg } from "../assets.js";
+import { generateImage, imageGenAvailable } from "../imageGen.js";
 
 // Article repository (#6): every optimization is stored, keyed by source URL, so
 // re-optimizing the same article OVERWRITES the previous version (latest only —
@@ -355,8 +356,8 @@ function renderResult(d){
     h+='<div class="card full"><h3>Who this is for</h3><div class="prose"><ul>'+
        c.whoThisIsFor.map(s=>'<li>'+esc(s)+'</li>').join('')+'</ul></div></div>';
   }
-  // Optimized article — the ORIGINAL title prints first (verbatim, never rewritten),
-  // then the optimized body.
+  // Optimized article — the visible H1 (the GEO-optimized headline, or the original
+  // title when unchanged) prints first, then the optimized body.
   const titleMd=d.title?('# '+d.title+'\\n\\n'):'';
   h+='<div class="card full"><div class="codehead"><h3>Optimized article</h3>'+
      '<span style="display:flex;gap:.5rem"><button class="copy" data-cwix="1">Copy for Wix (formatted)</button>'+copyBtn("full","Copy Markdown")+'</span></div>'+
@@ -378,8 +379,8 @@ function renderResult(d){
        metaRow("Original wording preserved", b.wordingPreservedPct+'%')+
        metaRow("Voice preservation score", b.voicePreservationScore+'/100')+
        metaRow("Paragraphs split", String(b.paragraphsSplit))+
-       metaRow("Headings preserved", String(b.headingsPreserved))+
-       metaRow("Headings changed", String(b.headingsChanged))+
+       metaRow("Headings kept as-is", String(b.headingsPreserved))+
+       metaRow("Headings rewritten/removed", String(b.headingsChanged))+
        metaRow("Duplicate headings removed", String(b.duplicateHeadingsRemoved))+
        metaRow("Claims added", String(b.claimsAdded))+
        metaRow("Claims removed", String(b.claimsRemoved))+
@@ -388,8 +389,8 @@ function renderResult(d){
        ed.gates.map(g=>'<li style="margin:.32rem 0">'+(g.pass?'<span style="color:#39d98a">✓</span>':'<span style="color:#ff6b6b">✗</span>')+' '+esc(g.label)+(g.detail?' <span class="hint">— '+esc(g.detail)+'</span>':'')+'</li>').join('')+
        '</ul></div>';
     if((ed.optionalSeoRecs||[]).length){
-      h+='<div class="card full"><h3>Optional SEO/GEO recommendations (not applied — title &amp; subtitles preserved)</h3>'+
-         '<p class="hint" style="margin:.2rem 0 .6rem">These are metadata suggestions kept OUT of the article body. Accept to use one (it applies to the page’s SEO metadata, not the visible article — your title, subtitles, and URL slug never change). Decline to leave it.</p>'+
+      h+='<div class="card full"><h3>SEO/GEO changes &amp; suggestions</h3>'+
+         '<p class="hint" style="margin:.2rem 0 .6rem">The visible headline and subtitles were optimized for GEO in the draft above. These notes show what changed (revert in your CMS if you prefer the original) plus the metadata-tag suggestions. The URL slug is never changed automatically — it would break existing links.</p>'+
          '<ul style="list-style:none;padding-left:0;margin:.2rem 0">'+
          ed.optionalSeoRecs.map((r,ri)=>'<li style="margin:.6rem 0;border-left:3px solid var(--line);padding-left:.7rem">'+
            '<div>'+esc(r)+'</div>'+
@@ -403,10 +404,13 @@ function renderResult(d){
   }
   // Recommended figures (machine-readable) — only when the source had no images
   if((c.imageSuggestions||[]).length){
+    const anyReal=(c.imageSuggestions||[]).some(s=>s.image);
     h+='<div class="card full"><h3>Generated figures</h3>'+
-       '<p class="hint" style="margin:.2rem 0 .6rem">The source had no images, so these figures were generated as clean, machine-readable SVGs (image, graphic, or graph) and embedded in the optimized article under their section as &lt;figure&gt; blocks with alt text + captions. Hit <b>Re-generate image</b> for a different color/variation, then Download PNG or SVG and Insert → Image in Wix.</p>';
+       '<p class="hint" style="margin:.2rem 0 .6rem">'+(anyReal
+         ?'The source had no images, so these were generated as real AI images from each figure prompt and embedded in the optimized article as &lt;figure&gt; blocks with alt text + captions. Hit <b>Re-generate image</b> for a fresh take, then Download PNG and Insert → Image in Wix.'
+         :'The source had no images, so these figures were generated as clean, machine-readable SVGs (image, graphic, or graph) and embedded in the optimized article under their section as &lt;figure&gt; blocks with alt text + captions. Hit <b>Re-generate image</b> for a different variation, then Download PNG or SVG and Insert → Image in Wix.')+'</p>';
     c.imageSuggestions.forEach((s,fi)=>{
-      const vis=s.svg||"";
+      const vis=s.image?('<img src="'+s.image+'" alt="'+esc(s.alt)+'" style="max-width:100%;height:auto;border-radius:14px;display:block"/>'):(s.svg||"");
       h+='<figure style="margin:1rem 0 1.3rem">'+
          '<div style="max-width:560px" id="figvis-'+fi+'">'+vis+'</div>'+
          '<figcaption class="hint" style="margin:.4rem 0 .4rem">'+esc(s.caption)+'</figcaption>'+
@@ -476,7 +480,7 @@ function renderResult(d){
   }
   // Metadata
   h+='<div class="card full"><h3>SEO/GEO metadata</h3><div class="meta">'+
-     metaRow("Title tag",m.title)+metaRow("Meta description",m.metaDescription)+metaRow("URL slug",m.slug)+
+     metaRow("Headline (visible H1)",m.headline||d.title)+metaRow("Title tag",m.title)+metaRow("Meta description",m.metaDescription)+metaRow("URL slug",m.slug)+
      metaRow("Tags",(m.tags||[]).join(", "))+metaRow("Social copy",m.socialCopy)+
      ((m.imageAltText||[]).length?metaRow("Image alt text",m.imageAltText.join(" | ")):"")+'</div></div>';
   // Asset recommendations
@@ -541,6 +545,7 @@ function bindFigDownloads(){
   document.querySelectorAll(".figdl").forEach(b=>b.onclick=async()=>{
     const i=+b.dataset.fig, f=FIGS[i]; if(!f)return;
     if(b.dataset.kind==="svg"){ if(f.svg) downloadBlob(new Blob([f.svg],{type:"image/svg+xml;charset=utf-8"}),"figure-"+(i+1)+".svg"); }
+    else if(f.image){ const a=document.createElement("a"); a.href=f.image; a.download="figure-"+(i+1)+".png"; document.body.appendChild(a); a.click(); a.remove(); }
     else if(f.svg){ svgToPng(f.svg,"figure-"+(i+1)+".png"); }
     const o=b.textContent;b.textContent="Saved ✓";setTimeout(()=>b.textContent=o,1200);
   });
@@ -551,11 +556,13 @@ function bindFigRegen(){
     const o=b.textContent; b.textContent="Generating…"; b.disabled=true;
     f._seed=(f._seed||0)+1;
     try{
-      const r=await fetch("/api/regenerate-image",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({section:f.section||"",caption:f.caption||"",alt:f.alt||"",kind:f.kind||"image",seed:f._seed})});
+      const r=await fetch("/api/regenerate-image",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({section:f.section||"",caption:f.caption||"",alt:f.alt||"",kind:f.kind||"image",prompt:f.prompt||"",seed:f._seed})});
       const d=await r.json();
-      if(!r.ok||!d.svg) throw new Error(d.error||"failed");
-      f.svg=d.svg;
-      const vis=$("#figvis-"+i); if(vis) vis.innerHTML=d.svg;
+      if(!r.ok) throw new Error(d.error||"failed");
+      const vis=$("#figvis-"+i);
+      if(d.image){ f.image=d.image; if(vis) vis.innerHTML='<img src="'+d.image+'" alt="'+esc(f.alt||"")+'" style="max-width:100%;height:auto;border-radius:14px;display:block"/>'; }
+      else if(d.svg){ f.image=undefined; f.svg=d.svg; if(vis) vis.innerHTML=d.svg; }
+      else throw new Error("failed");
     }catch(e){ alert("Could not re-generate figure: "+e.message); }
     finally{ b.textContent=o; b.disabled=false; }
   });
@@ -690,14 +697,24 @@ app.post("/api/suggest", async (req, res) => {
   }
 });
 
-// Re-generate a single figure (Re-generate button): render a fresh SVG variant
-// with a new seed (different palette / bar layout). Free — no image API.
-app.post("/api/regenerate-image", (req, res) => {
+// Re-generate a single figure (Re-generate button). When a paid image API is
+// configured, generate a fresh REAL image from the figure's prompt; otherwise
+// render a fresh SVG variant with a new seed (free — different palette / layout).
+app.post("/api/regenerate-image", async (req, res) => {
   const b = req.body ?? {};
   const kindRaw = (b.kind ?? "image").toString();
   const kind: "image" | "graphic" | "graph" = kindRaw === "graphic" ? "graphic" : kindRaw === "graph" ? "graph" : "image";
   const seed = Number.isFinite(Number(b.seed)) ? Math.floor(Number(b.seed)) : 0;
+  const prompt = (b.prompt ?? "").toString();
   try {
+    if (imageGenAvailable() && prompt) {
+      const image = await generateImage(prompt, kind);
+      if (image) {
+        res.json({ image });
+        return;
+      }
+      // fall through to the SVG variant if the image API returned nothing
+    }
     const svg = figureSvg(
       {
         section: (b.section ?? "").toString(),
@@ -748,18 +765,27 @@ async function renderDashboard(): Promise<string> {
   const body = rows.length
     ? rows
         .map(
-          (r) =>
-            `<tr><td><a href="/r/${r.id}">${esc(r.title)}</a></td><td class="sc" style="color:${r.score >= 70 ? "#39d98a" : r.score >= 45 ? "#e0b341" : "#ff6b6b"}">${r.score}</td><td>${new Date(r.savedAt).toLocaleString("en-US", { timeZone: "America/Chicago", timeZoneName: "short" })}</td><td><a href="${esc(r.url)}" target="_blank" rel="noopener">source</a></td></tr>`,
+          (r, i) =>
+            `<tr><td class="num">${i + 1}</td><td><a href="/r/${r.id}">${esc(r.title)}</a></td><td class="sc" style="color:${r.score >= 70 ? "#39d98a" : r.score >= 45 ? "#e0b341" : "#ff6b6b"}">${r.score}</td><td>${new Date(r.savedAt).toLocaleString("en-US", { timeZone: "America/Chicago", timeZoneName: "short" })}</td><td><a href="${esc(r.url)}" target="_blank" rel="noopener">source</a></td></tr>`,
         )
         .join("")
-    : '<tr><td colspan="4" style="color:#9aa6bb">No optimized articles yet. Optimize one, then it appears here.</td></tr>';
+    : '<tr><td colspan="5" style="color:#9aa6bb">No optimized articles yet. Optimize one, then it appears here.</td></tr>';
+  const total = rows.length;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GEO Optimizer — Saved Articles</title>
 <style>body{background:#0b0f17;color:#e8ebf0;font-family:system-ui,Segoe UI,Arial;max-width:1000px;margin:0 auto;padding:2rem}
 a{color:#4f8cff;text-decoration:none}a:hover{text-decoration:underline}h1{font-size:1.5rem}
-table{width:100%;border-collapse:collapse;margin-top:1rem}th,td{text-align:left;padding:.6rem .5rem;border-bottom:1px solid #1c2433}
-th{color:#9aa6bb;font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}.sc{font-weight:700}</style></head>
-<body><h1>Saved GEO-optimized articles</h1><p style="color:#9aa6bb">Latest version of each article (re-optimizing overwrites the older one). <a href="/">← Back to optimizer</a></p>
-<table><thead><tr><th>Title</th><th>Score</th><th>Saved</th><th>Original</th></tr></thead><tbody>${body}</tbody></table></body></html>`;
+table{width:100%;border-collapse:collapse;margin-top:1rem;table-layout:fixed}
+th,td{text-align:left;padding:.6rem .6rem;border-bottom:1px solid #1c2433;vertical-align:top;overflow-wrap:anywhere;word-break:break-word}
+th{color:#9aa6bb;font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}
+.sc{font-weight:700}
+.num{color:#9aa6bb;font-variant-numeric:tabular-nums}
+/* Fixed layout + explicit widths so a long raw-URL title wraps instead of running off-screen. */
+th:nth-child(1),td:nth-child(1){width:2.2rem;text-align:right;padding-right:.8rem}
+th:nth-child(3),td:nth-child(3){width:3.5rem}
+th:nth-child(4),td:nth-child(4){width:11rem}
+th:nth-child(5),td:nth-child(5){width:5rem}</style></head>
+<body><h1>Saved GEO-optimized articles</h1><p style="color:#9aa6bb">${total} article${total === 1 ? "" : "s"} optimized · latest version of each (re-optimizing overwrites the older one). <a href="/">← Back to optimizer</a></p>
+<table><thead><tr><th>#</th><th>Title</th><th>Score</th><th>Saved</th><th>Original</th></tr></thead><tbody>${body}</tbody></table></body></html>`;
 }
 
 // Prevent unhandled promise rejections / uncaught exceptions from silently

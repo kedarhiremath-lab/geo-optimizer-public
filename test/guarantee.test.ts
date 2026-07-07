@@ -31,7 +31,7 @@ function content(body: string): OptimizedContent {
       { q: "How to measure ROI?", a: "In stages." },
       { q: "What data to collect?", a: "Successes and failures." },
     ],
-    metadata: { title: "Optimized", metaDescription: "Optimized desc.", slug: "s", tags: ["a"], socialCopy: "c", imageAltText: [] },
+    metadata: { headline: "Optimized headline", title: "Optimized", metaDescription: "Optimized desc.", slug: "s", tags: ["a"], socialCopy: "c", imageAltText: [] },
     assetRecommendations: [],
   };
 }

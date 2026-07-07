@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { figureBlock, pickFigures, insertFigures, ensureDownloadsSection } from "../src/assets.js";
+import { figureBlock, pickFigures, insertFigures, ensureDownloadsSection, contentHeadingTexts } from "../src/assets.js";
 import type { ImageSuggestion } from "../src/types.js";
 
 const sug = (section: string): ImageSuggestion => ({
@@ -52,6 +52,46 @@ describe("insertFigures", () => {
     expect(out).toContain("<figure>");
     expect(out.indexOf("<figure>")).toBeGreaterThan(out.indexOf("## Details"));
     expect(out.indexOf("<figure>")).toBeLessThan(out.indexOf("body two"));
+  });
+
+  it("appends (does not cluster at the top) when no heading matches", () => {
+    const md = "## Intro\n\nbody one";
+    const out = insertFigures(md, [sug("Nonexistent Section")]);
+    // figure goes after the body, not jammed under Intro
+    expect(out.indexOf("<figure>")).toBeGreaterThan(out.indexOf("body one"));
+  });
+});
+
+describe("GEO-rewritten headings (regression: figures must not cluster at the top)", () => {
+  // The model rewrote body headings for GEO; the original heading text no longer
+  // appears. Figures must still land under the right (rewritten) sections.
+  const md =
+    "# Optimized Headline\n\n## The Short Version\n\n- a\n\n## What makes real-time control possible?\n\nbody one\n\n## How does ROS 2 help teams?\n\nbody two";
+
+  it("contentHeadingTexts excludes the H1 title and engine scaffolding", () => {
+    expect(contentHeadingTexts(md)).toEqual([
+      "What makes real-time control possible?",
+      "How does ROS 2 help teams?",
+    ]);
+  });
+
+  it("anchors a model figure (referencing the ORIGINAL heading) to the rewritten heading", () => {
+    const heads = contentHeadingTexts(md);
+    const figs = pickFigures([sug("Real-time control")], heads, 2, 4);
+    // the model's suggestion (original wording) is re-anchored to the rewritten heading
+    expect(figs[0].section).toBe("What makes real-time control possible?");
+  });
+
+  it("inserts figures under the rewritten sections, not under 'The Short Version'", () => {
+    const heads = contentHeadingTexts(md);
+    const figs = pickFigures([sug("Real-time control")], heads, 2, 4);
+    const out = insertFigures(md, figs);
+    const shortIdx = out.indexOf("## The Short Version");
+    const rtIdx = out.indexOf("## What makes real-time control possible?");
+    // no figure was dumped between the Short Version and the first real section
+    expect(out.slice(shortIdx, rtIdx).includes("<figure>")).toBe(false);
+    // a figure sits under the rewritten real-time-control section
+    expect(out.indexOf("<figure>")).toBeGreaterThan(rtIdx);
   });
 });
 

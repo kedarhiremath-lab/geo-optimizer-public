@@ -9,6 +9,7 @@
 //   rewrite so nothing gated/linked is lost.
 
 import type { ImageSuggestion } from "./types.js";
+import { topicOverlap } from "./score.js";
 
 const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const escAttr = (s: string) => escHtml(s).replace(/"/g, "&quot;");
@@ -217,43 +218,80 @@ function headingsOf(md: string): { line: string; text: string }[] {
   return out;
 }
 
-/** Pick up to `max` suggestions that map to one of the FIRST `withinFirst` sections. */
+/** Engine-scaffolding headings that aren't real author sections — figures should
+ * never anchor to these. */
+const SCAFFOLD_HEADINGS = new Set([
+  "the short version", "who this is for", "frequently asked questions", "faq",
+  "sources", "references", "downloads", "deployment readiness at a glance",
+]);
+
+/**
+ * The article's real content-section headings (##/###) in document order, excluding
+ * the H1 title and engine scaffolding (Short Version, FAQ, Sources, …). Use this to
+ * anchor figures to the sections the reader actually sees — which, now that headings
+ * are GEO-rewritten, are NOT the original extracted headings.
+ */
+export function contentHeadingTexts(md: string): string[] {
+  return headingsOf(md)
+    .map((h) => h.text)
+    .filter((t) => !SCAFFOLD_HEADINGS.has(normH(t)));
+}
+
+/**
+ * Pick up to `max` figures for the FIRST `withinFirst` content sections, anchoring
+ * each to a REAL current heading (headings may have been rewritten for GEO). For
+ * each target section we reuse a model suggestion about that topic when one exists,
+ * otherwise synthesize one — and in both cases set `.section` to the actual heading
+ * so the figure's title and its insertion point match the rewritten body.
+ */
 export function pickFigures(
   suggestions: ImageSuggestion[],
   headings: string[],
   max = 2,
   withinFirst = 4,
 ): ImageSuggestion[] {
-  const firstHeads = headings.slice(0, withinFirst).map(normH);
-  const matched = suggestions.filter((s) => firstHeads.some((h) => h && normH(s.section) && (h.includes(normH(s.section)) || normH(s.section).includes(h))));
-  const chosen = (matched.length ? matched : suggestions).slice(0, max);
-  // If the model gave fewer than `max`, synthesize from the first sections so we
-  // always offer at least two machine-readable figures (the ask: "generate 2").
-  const used = [...chosen];
-  for (let i = 0; used.length < max && i < headings.slice(0, withinFirst).length; i++) {
-    const section = headings[i];
-    if (used.some((u) => normH(u.section) === normH(section))) continue;
-    used.push({
-      section,
-      alt: `Diagram illustrating "${section}".`,
-      caption: section,
-      prompt: `A clean, professional editorial diagram for a robotics article section titled "${section}". Minimal, technical, on-brand; no text-heavy clutter.`,
-    });
+  const targets = headings.slice(0, withinFirst);
+  const out: ImageSuggestion[] = [];
+  const usedSug = new Set<number>();
+  for (const section of targets) {
+    if (out.length >= max) break;
+    let pick: ImageSuggestion | null = null;
+    for (let i = 0; i < suggestions.length; i++) {
+      if (usedSug.has(i)) continue;
+      const s = suggestions[i];
+      const ref = s.section || s.alt;
+      if (ref && topicOverlap(section, ref)) {
+        pick = s;
+        usedSug.add(i);
+        break;
+      }
+    }
+    out.push(
+      pick
+        ? { ...pick, section } // anchor the model's figure to the real heading text
+        : {
+            section,
+            alt: `Diagram illustrating "${section}".`,
+            caption: section,
+            prompt: `A clean, professional editorial diagram for a robotics article section titled "${section}". Minimal, technical, on-brand; no text-heavy clutter.`,
+          },
+    );
   }
-  return used.slice(0, max);
+  return out;
 }
 
 /**
- * Insert figures into the article after their matching section heading (or after
- * the first body heading if no match). Returns the augmented markdown + which
- * suggestions were placed.
+ * Insert figures right after their matching section heading. Because pickFigures
+ * anchors each figure's `.section` to a real current heading, the match is exact;
+ * if a heading somehow isn't found we append the figure at the end rather than
+ * dumping it under the first heading.
  */
 export function insertFigures(md: string, figures: ImageSuggestion[]): string {
   if (!figures.length) return md;
   const heads = headingsOf(md);
   let out = md;
   for (const fig of figures) {
-    const target = heads.find((h) => normH(h.text) === normH(fig.section)) || heads[0];
+    const target = heads.find((h) => normH(h.text) === normH(fig.section));
     if (!target) {
       out += "\n\n" + figureBlock(fig);
       continue;

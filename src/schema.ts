@@ -51,11 +51,14 @@ export function buildSchemas(article: Article, content: OptimizedContent): Schem
   const notes: string[] = [];
   const schemas: Record<string, unknown>[] = [];
 
+  // The visible/optimized headline (falls back to the original title).
+  const headline = (content.metadata.headline || article.title).trim();
+
   // 1. Article / TechArticle
   const article_: Record<string, unknown> = {
     "@context": "https://schema.org",
     "@type": "TechArticle",
-    headline: article.title.slice(0, 110),
+    headline: headline.slice(0, 110),
     url: article.url,
     author: article.byline
       ? { "@type": "Person", name: article.byline }
@@ -69,7 +72,7 @@ export function buildSchemas(article: Article, content: OptimizedContent): Schem
   const missing = ARTICLE_REQUIRED.filter((k) => !(k in article_));
   const articleValid = missing.length === 0;
   if (!articleValid) notes.push(`Article schema missing: ${missing.join(", ")}.`);
-  if (article.title.length > 110) notes.push("Headline truncated to 110 chars for Google.");
+  if (headline.length > 110) notes.push("Headline truncated to 110 chars for Google.");
   schemas.push(article_);
 
   // 2. Organization

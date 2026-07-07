@@ -21,3 +21,16 @@ services:
         value: gemini-2.5-flash
       - key: APP_PASSWORD
         sync: false          # set a password; the site will require it
+      # Rewrite model — Anthropic Claude (best voice preservation) when its key is set.
+      - key: ANTHROPIC_API_KEY
+        sync: false          # paste in the Render dashboard (secret)
+      - key: ANTHROPIC_MODEL
+        value: claude-opus-4-8
+      # Real AI figure images (paid). Set OPENAI_API_KEY in the dashboard to enable;
+      # without it the app falls back to inline SVG figures automatically.
+      - key: IMAGE_API
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false          # paste in the Render dashboard (secret)
+      - key: IMAGE_QUALITY
+        value: low           # low keeps saved results small enough for durable storage
