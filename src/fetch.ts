@@ -108,6 +108,11 @@ export async function fetchRendered(url: string, opts: FetchOptions = {}): Promi
         /* networkidle can time out; DOM is usually ready anyway */
       });
       html = (await run(["html"])).stdout;
+      // browse can exit 0 yet dump a stub page (silently failed navigation);
+      // treat that as a failure so the Playwright fallback gets a chance.
+      if (!html || html.length < MIN_HTML_BYTES) {
+        throw new Error(`browse returned only ${html?.length ?? 0} bytes`);
+      }
     } catch (browseErr) {
       // Fallback: direct Playwright render (eng review #7).
       html = await renderWithPlaywright(url, timeoutMs);

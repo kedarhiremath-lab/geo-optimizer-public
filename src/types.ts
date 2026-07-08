@@ -198,6 +198,8 @@ export interface OptimizeResult {
    * judges it improves ranking or readability; otherwise the original title.
    * Rendered first. */
   title: string;
+  /** The source article's original title, unmodified — used to match the post in the CMS. */
+  originalTitle: string;
   baselineScore: number;
   /** Score of the model's own rewrite, BEFORE deterministic guarantees (raw model quality). */
   modelScore: number;

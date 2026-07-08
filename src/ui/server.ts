@@ -306,6 +306,14 @@ function renderResult(d){
   RAW={full:d.rewrittenDraft, schema:JSON.stringify(d.schemas,null,2)};
   const c=d.content||{}, m=c.metadata||{};
   FIGS=c.imageSuggestions||[];
+  // The durable store strips imageSuggestions[].image (base64) to keep records
+  // small, but the SAME real images stay embedded in rewrittenDraft's <figure>
+  // blocks. Harvest them (document order) so the figures card + Download PNG show
+  // the real generated images instead of the identical SVG placeholders.
+  if(FIGS.length && !FIGS.some(s=>s.image)){
+    const found=(d.rewrittenDraft||"").match(/data:image\\/[a-z+]+;base64,[^"')\\s]+/g)||[];
+    FIGS.forEach((s,i)=>{ if(found[i]) s.image=found[i]; });
+  }
   const safe=d.safe, delta=d.optimizedScore-d.baselineScore, ds=(delta>=0?"+":"")+delta;
   const ms=(d.modelScore!==undefined)?d.modelScore:d.optimizedScore;
   const ed=d.editorial;

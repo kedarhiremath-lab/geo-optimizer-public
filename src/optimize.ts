@@ -398,6 +398,7 @@ export async function optimize(
   return {
     url,
     title: optimizedTitle, // visible H1 — GEO-optimized when it helps, else original
+    originalTitle: article.title, // the source article's title (for CMS matching)
     baselineScore: scored.baselineScore,
     modelScore,
     optimizedScore,

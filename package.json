@@ -7,6 +7,9 @@
   "scripts": {
     "optimize": "tsx src/cli.ts",
     "inspect": "tsx inspect.ts",
+    "crawl": "tsx src/crawl-cli.ts",
+    "wix:match": "tsx src/wix/match-report.ts",
+    "batch": "tsx src/batch.ts",
     "ui": "tsx src/ui/server.ts",
     "test": "vitest run",
     "eval": "tsx eval/run.ts",
